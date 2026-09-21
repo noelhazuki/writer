@@ -196,6 +196,19 @@
   .plot-scene:last-child{ border-bottom:none; }
   .scene-order-btns{ display:flex; gap:4px; }
 
+  .writing-block-board{margin:14px 0;padding:12px;border:1px solid var(--line);border-radius:var(--radius-m);background:var(--paper-dim)}
+  .writing-block-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+  .writing-block-card{display:flex;gap:8px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px;margin:4px 0}
+  .writing-block-card.active{border-color:var(--accent)}
+  .writing-block-select{min-width:0;flex:1;text-align:left;border:0;background:transparent;color:var(--ink);display:grid;gap:3px;cursor:pointer}
+  .writing-block-select small,.writing-block-select span{color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .writing-block-actions{display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end}
+  .writing-block-insert{display:block;width:100%;padding:7px;border:0;background:transparent;color:var(--accent);cursor:pointer}
+  .writing-block-read{background:var(--card);padding:16px;border-radius:8px;line-height:1.9}
+  .writing-block-read section{margin-bottom:24px}
+  .writing-block-prose{white-space:pre-wrap;overflow-wrap:anywhere}
+  .writing-block-placeholder{color:var(--ink-soft);font-style:italic}
+  @media(max-width:640px){.writing-block-card{align-items:stretch;flex-direction:column}.writing-block-actions .btn{min-height:36px}}
   .writing-list-row{ display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border:1px solid var(--line); border-radius:var(--radius-s); margin-bottom:8px; background:var(--card); }
   .writing-body-area{ width:100%; min-height:65vh; padding:20px; border:1px solid var(--line); border-radius:var(--radius-m); line-height:2; font-size:16px; resize:vertical; background:#fffdf8; }
   .writing-toolbar-gap{ margin-top:6px; margin-bottom:14px; }
@@ -1772,6 +1785,15 @@ function migrateData(parsed){
   if(!parsed.worldSettings) parsed.worldSettings = initialData().worldSettings;
   if(!parsed.plot) parsed.plot = { structureType:'自由構成', chapters: [] };
   if(!parsed.writings) parsed.writings = [];
+  parsed.writings = parsed.writings.map(w=>{
+    const blocks=Array.isArray(w.blocks)&&w.blocks.length?w.blocks.map(b=>({
+      id:b.id||uid('wblock'),title:b.title||'無題の場面',body:String(b.body||''),
+      memo:String(b.memo||''),kind:b.kind==='adult'?'adult':'normal',
+      status:['未定','執筆中','一旦完成'].includes(b.status)?b.status:'執筆中',
+      adultNote:String(b.adultNote||'')
+    })):[{id:uid('wblock'),title:w.title||'本文',body:String(w.body||''),memo:'',kind:'normal',status:'執筆中',adultNote:''}];
+    return {...w,blocks,body:blocks.map(b=>b.body).filter(Boolean).join('\n\n')};
+  });
   if(!parsed.ideas) parsed.ideas = [];
   if(!parsed.timeline) parsed.timeline = [];
   if(!parsed.characters) parsed.characters = [];
@@ -4152,6 +4174,9 @@ function Plot({ data, setData, allChars, allLocations }){
 /* ============ 本文 ============ */
 function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds }){
   const [openId, setOpenId] = useState(null);
+  const [activeBlockId,setActiveBlockId]=useState(null);
+  const [blockDraft,setBlockDraft]=useState(null);
+  const [readAll,setReadAll]=useState(false);
   const [writingFontSize, setWritingFontSizeState] = useState(loadWritingFontSize);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [dictEditorOpen, setDictEditorOpen] = useState(false);
@@ -4185,15 +4210,68 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   };
 
   const addChapter = () => {
-    const w = { id: uid('wr'), title: `第${data.writings.length+1}章`, body:'', memo:'', personIds:[], locationIds:[], ideaIds:[] };
+    const block={id:uid('wblock'),title:'最初の場面',body:'',memo:'',kind:'normal',status:'執筆中',adultNote:''};
+    const w = { id: uid('wr'), title: `第${data.writings.length+1}章`, body:'', blocks:[block], memo:'', personIds:[], locationIds:[], ideaIds:[] };
+    setActiveBlockId(block.id);
     setData(d=>({...d, writings:[...d.writings, w]}));
     setOpenId(w.id);
   };
-  const update = (id, patch) => setData(d=>({...d, writings: d.writings.map(w=>w.id===id?{...w,...patch}:w)}));
+  const update = (id, patch) => setData(d=>({...d,writings:d.writings.map(w=>{
+    if(w.id!==id)return w;
+    if(patch.body===undefined)return {...w,...patch};
+    const blocks=(w.blocks||[]).map(b=>b.id===(activeBlockId||w.blocks[0].id)?{...b,body:patch.body}:b);
+    const {body:ignored,...rest}=patch;
+    return {...w,...rest,blocks,body:blocks.map(b=>b.body).filter(Boolean).join('\n\n')};
+  })}));
+  const updateBlocks=(id,fn)=>setData(d=>({...d,writings:d.writings.map(w=>{
+    if(w.id!==id)return w;
+    const blocks=fn(w.blocks||[]);
+    return {...w,blocks,body:blocks.map(b=>b.body).filter(Boolean).join('\n\n')};
+  })}));
+  const insertBlock=(chapter,index)=>{
+    const b={id:uid('wblock'),title:'新しい場面',body:'',memo:'',kind:'normal',status:'未定',adultNote:''};
+    updateBlocks(chapter.id,rows=>{const next=[...rows];next.splice(index,0,b);return next;});
+    setActiveBlockId(b.id);setReadAll(false);setFocusMode(false);
+  };
+  const moveBlock=(chapter,index,delta)=>updateBlocks(chapter.id,rows=>{
+    const next=[...rows],to=index+delta;
+    if(to<0||to>=next.length)return rows;
+    [next[index],next[to]]=[next[to],next[index]];return next;
+  });
+  const saveBlockDraft=()=>{
+    if(!blockDraft||!blockDraft.title.trim())return;
+    updateBlocks(openChapter.id,rows=>rows.map(b=>b.id===blockDraft.id?{...blockDraft,title:blockDraft.title.trim()}:b));
+    setBlockDraft(null);
+  };
+  const removeBlock=(chapter,block)=>{
+    if(chapter.blocks.length<2||!confirm(`「${block.title}」を削除しますか？本文も消えます。`))return;
+    updateBlocks(chapter.id,rows=>rows.filter(b=>b.id!==block.id));
+    if(activeBlockId===block.id)setActiveBlockId(chapter.blocks.find(b=>b.id!==block.id).id);
+  };
   const remove = (id) => { if(confirm('この章を削除しますか？')){ setData(d=>({...d, writings: d.writings.filter(w=>w.id!==id)})); setOpenId(null); setFocusMode(false); setPaletteOpen(false); setExprDictOpen(false); setWritingMoreOpen(false); } };
   const backToList = () => { setOpenId(null); setFocusMode(false); setPaletteOpen(false); setExprDictOpen(false); setWritingMoreOpen(false); };
 
-  const open = openId ? data.writings.find(w=>w.id===openId) : null;
+  const openChapter = openId ? data.writings.find(w=>w.id===openId) : null;
+  const activeBlock=openChapter&&(openChapter.blocks||[]).find(b=>b.id===activeBlockId)||(openChapter&&openChapter.blocks&&openChapter.blocks[0]);
+  const open=openChapter&&activeBlock?{...openChapter,body:activeBlock.body}:null;
+  const blockBoard=openChapter&&<div className="writing-block-board">
+    <div className="writing-block-toolbar"><strong>文章ブロック</strong><button className="btn btn-sm" onClick={()=>setReadAll(x=>!x)}>{readAll?'編集に戻る':'通して読む'}</button></div>
+    {readAll?<div className="writing-block-read">{openChapter.blocks.map(b=><section key={b.id}><h3>{b.title}</h3>{b.body?<div className="writing-block-prose">{b.body}</div>:<p className="writing-block-placeholder">ここに書く場面：{b.memo||'未定'}</p>}</section>)}</div>:<>
+      <button className="writing-block-insert" onClick={()=>insertBlock(openChapter,0)}>＋ 先頭に場面を挿入</button>
+      {openChapter.blocks.map((b,i)=><React.Fragment key={b.id}><div className={'writing-block-card'+(activeBlock&&b.id===activeBlock.id?' active':'')}>
+        <button className="writing-block-select" onClick={()=>{setActiveBlockId(b.id);setFocusMode(false)}}><strong>{b.title}</strong><small>{b.status}・{b.body.length}文字{b.kind==='adult'?'・成人向け':''}</small><span>{b.body.slice(0,90)||b.memo||'本文未入力'}</span></button>
+        <div className="writing-block-actions"><button className="btn btn-sm" onClick={()=>setBlockDraft({...b})}>出来事メモ</button><button className="btn btn-sm" onClick={()=>moveBlock(openChapter,i,-1)} disabled={i===0} aria-label="上へ移動">↑</button><button className="btn btn-sm" onClick={()=>moveBlock(openChapter,i,1)} disabled={i===openChapter.blocks.length-1} aria-label="下へ移動">↓</button><button className="btn btn-sm btn-danger" onClick={()=>removeBlock(openChapter,b)} disabled={openChapter.blocks.length<2} aria-label="ブロックを削除">×</button></div>
+      </div><button className="writing-block-insert" onClick={()=>insertBlock(openChapter,i+1)}>＋ ここに場面を挿入</button></React.Fragment>)}
+    </>}
+  </div>;
+  const blockModal=blockDraft&&<Modal title="出来事メモ" onClose={()=>setBlockDraft(null)} wide>
+    <div className="dict-field-block"><label className="dict-field-label">場面の見出し</label><input value={blockDraft.title} onChange={e=>setBlockDraft(d=>({...d,title:e.target.value}))}/></div>
+    <div className="scene-meta-grid"><div className="dict-field-block"><label className="dict-field-label">状態</label><select value={blockDraft.status} onChange={e=>setBlockDraft(d=>({...d,status:e.target.value}))}>{['未定','執筆中','一旦完成'].map(x=><option key={x}>{x}</option>)}</select></div>
+    <div className="dict-field-block"><label className="dict-field-label">場面の種類</label><select value={blockDraft.kind} onChange={e=>setBlockDraft(d=>({...d,kind:e.target.value}))}><option value="normal">通常</option><option value="adult">成人向け</option></select></div></div>
+    <div className="dict-field-block"><label className="dict-field-label">出来事・明かすこと・まだ隠すこと（自由メモ）</label><textarea rows="8" value={blockDraft.memo} onChange={e=>setBlockDraft(d=>({...d,memo:e.target.value}))}/></div>
+    {blockDraft.kind==='adult'&&<div className="dict-field-block"><label className="dict-field-label">行為前後の関係や、次の場面へ残すもの</label><textarea rows="4" value={blockDraft.adultNote} onChange={e=>setBlockDraft(d=>({...d,adultNote:e.target.value}))}/><p className="adult-tab-desc">詳しい段階設計は「成人向け創作」のシーン進行でも扱えます。</p></div>}
+    <div className="modal-actions"><button className="btn" onClick={()=>setBlockDraft(null)}>キャンセル</button><button className="btn btn-primary" onClick={saveBlockDraft}>保存</button></div>
+  </Modal>;
   const charOptions = allChars.map(c=>({id:c.id,label:c.name||'（無名）'}));
   const locOptions = allLocations.map(l=>({id:l.id,label:l.name||'（無名）'}));
   const ideaOptions = data.ideas.map(i=>({id:i.id,label:(i.content||'').slice(0,20)||'（無題）'}));
@@ -4477,7 +4555,9 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
             <button type="button" className="btn btn-sm writing-more-btn writing-only-mobile" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleWritingMore} aria-label="その他の操作" title="その他の操作">⋯</button>
           </div>
         </div>
-        <div className="writing-toolbar-gap" />
+        {blockBoard}
+        {blockModal}
+        {readAll?<div className="writing-block-read-note">文章を確認したら「編集に戻る」で本文を編集できます。</div>:<><div className="writing-toolbar-gap" />
         <textarea ref={textareaRef} className="writing-body-area" style={{fontSize:writingFontSize}} value={open.body}
           onChange={e=>{ update(open.id,{body:e.target.value}); rememberEditorState(); }}
           onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState} onBlur={rememberEditorState}
@@ -4497,7 +4577,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
             <LinkPicker label="場所" options={locOptions} selectedIds={open.locationIds} onChange={ids=>update(open.id,{locationIds:ids})} />
             <LinkPicker label="関連ネタ" options={ideaOptions} selectedIds={open.ideaIds} onChange={ids=>update(open.id,{ideaIds:ids})} />
           </CollapsibleSection>
-        </div>
+        </div></>}
       </div>
     );
   }
@@ -4511,7 +4591,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
       </div>
       {data.writings.length===0 && <div className="empty-hint">まだ本文がありません。「＋ 章を追加」から書き始められます。</div>}
       {data.writings.map(w=>(
-        <div className="writing-list-row" key={w.id} onClick={()=>setOpenId(w.id)} style={{cursor:'pointer'}}>
+        <div className="writing-list-row" key={w.id} onClick={()=>{setOpenId(w.id);setActiveBlockId(w.blocks&&w.blocks[0]&&w.blocks[0].id);setReadAll(false)}} style={{cursor:'pointer'}}>
           <div>
             <div style={{fontWeight:700}}>{w.title}</div>
             <div style={{fontSize:12, color:'var(--ink-soft)'}}>{w.body.length} 文字</div>
@@ -6430,8 +6510,42 @@ function AdultRatingBadges({ x }){
   );
 }
 
-function StoryToolsScreen({outlineData,setOutlineData,sceneData,setSceneData,patternData,setPatternData}){
-  const [tab,setTab]=useState('outline');
+function WritingBlockOverview({data,setData}){
+  const [draft,setDraft]=useState(null);
+  const patchBlocks=(chapterId,fn)=>setData(d=>({...d,writings:d.writings.map(w=>{
+    if(w.id!==chapterId)return w;
+    const blocks=fn(w.blocks||[]);
+    return {...w,blocks,body:blocks.map(b=>b.body).filter(Boolean).join('\n\n')};
+  })}));
+  const insert=(chapter,index)=>{
+    const b={id:uid('wblock'),title:'新しい場面',body:'',memo:'',kind:'normal',status:'未定',adultNote:''};
+    patchBlocks(chapter.id,rows=>{const next=[...rows];next.splice(index,0,b);return next;});
+    setDraft({chapterId:chapter.id,block:b});
+  };
+  const move=(chapter,index,delta)=>patchBlocks(chapter.id,rows=>{
+    const next=[...rows],to=index+delta;if(to<0||to>=next.length)return rows;
+    [next[index],next[to]]=[next[to],next[index]];return next;
+  });
+  const save=()=>{
+    if(!draft||!draft.block.title.trim())return;
+    patchBlocks(draft.chapterId,rows=>rows.map(b=>b.id===draft.block.id?{...draft.block,title:draft.block.title.trim()}:b));
+    setDraft(null);
+  };
+  return <div><p className="adult-tab-desc">本文の文章ブロックを並び順で表示します。場面の見出しやメモをここで編集できます。文章は「本文」で同じブロックを編集します。</p>
+    {!data.writings.length&&<div className="empty-hint">「本文」で章を追加すると、ここに文章ブロックが並びます。</div>}
+    {data.writings.map(chapter=><section className="writing-block-board" key={chapter.id}><h2>{chapter.title}</h2>
+      <button className="writing-block-insert" onClick={()=>insert(chapter,0)}>＋ 先頭に挿入</button>
+      {(chapter.blocks||[]).map((b,i)=><React.Fragment key={b.id}><div className="writing-block-card">
+        <button className="writing-block-select" onClick={()=>setDraft({chapterId:chapter.id,block:{...b}})}><strong>{b.title}</strong><small>{b.status}・{b.body.length}文字{b.kind==='adult'?'・成人向け':''}</small><span>{b.memo||b.body.slice(0,100)||'未定の場面'}</span></button>
+        <div className="writing-block-actions"><button className="btn btn-sm" onClick={()=>setDraft({chapterId:chapter.id,block:{...b}})}>メモ</button><button className="btn btn-sm" disabled={i===0} onClick={()=>move(chapter,i,-1)}>↑</button><button className="btn btn-sm" disabled={i===chapter.blocks.length-1} onClick={()=>move(chapter,i,1)}>↓</button></div>
+      </div><button className="writing-block-insert" onClick={()=>insert(chapter,i+1)}>＋ ここに挿入</button></React.Fragment>)}
+    </section>)}
+    {draft&&<Modal title="出来事メモ" onClose={()=>setDraft(null)} wide><div className="dict-field-block"><label className="dict-field-label">場面の見出し</label><input value={draft.block.title} onChange={e=>setDraft(d=>({...d,block:{...d.block,title:e.target.value}}))}/></div><div className="scene-meta-grid"><div className="dict-field-block"><label className="dict-field-label">状態</label><select value={draft.block.status} onChange={e=>setDraft(d=>({...d,block:{...d.block,status:e.target.value}}))}>{['未定','執筆中','一旦完成'].map(x=><option key={x}>{x}</option>)}</select></div><div className="dict-field-block"><label className="dict-field-label">場面の種類</label><select value={draft.block.kind} onChange={e=>setDraft(d=>({...d,block:{...d.block,kind:e.target.value}}))}><option value="normal">通常</option><option value="adult">成人向け</option></select></div></div><div className="dict-field-block"><label className="dict-field-label">出来事・明かすこと・まだ隠すこと</label><textarea rows="8" value={draft.block.memo} onChange={e=>setDraft(d=>({...d,block:{...d.block,memo:e.target.value}}))}/></div>{draft.block.kind==='adult'&&<div className="dict-field-block"><label className="dict-field-label">行為前後の関係や次へ残すもの</label><textarea rows="4" value={draft.block.adultNote} onChange={e=>setDraft(d=>({...d,block:{...d.block,adultNote:e.target.value}}))}/></div>}<div className="modal-actions"><button className="btn" onClick={()=>setDraft(null)}>キャンセル</button><button className="btn btn-primary" onClick={save}>保存</button></div></Modal>}
+  </div>;
+}
+
+function StoryToolsScreen({outlineData,setOutlineData,sceneData,setSceneData,patternData,setPatternData,data,setData}){
+  const [tab,setTab]=useState('blocks');
   const createSceneFromOutline=(projectId,blockId,item)=>{
     const scene=newSceneFromTemplate('basic',item.title||'新しいシーン');
     Object.assign(scene,{purpose:item.summary||'',sceneRole:item.type||'本筋',location:item.location||'',pov:item.pov||'',timeRelation:item.timeRelation||'直後',readerInfo:item.readerInfo||'',characterInfo:item.characterInfo||'',returnToMain:!!item.returnToMain,outlineItemId:item.id});
@@ -6441,8 +6555,8 @@ function StoryToolsScreen({outlineData,setOutlineData,sceneData,setSceneData,pat
   };
   return <div>
     <div className="toolbar"><h1>🎬 シーン・物語設計</h1></div>
-    <div className="story-tools-tabs"><button className={'story-tools-tab'+(tab==='outline'?' active':'')} onClick={()=>setTab('outline')}>全体構成</button><button className={'story-tools-tab'+(tab==='scene'?' active':'')} onClick={()=>setTab('scene')}>シーン補助</button><button className={'story-tools-tab'+(tab==='patterns'?' active':'')} onClick={()=>setTab('patterns')}>物語パターン集</button></div>
-    {tab==='outline'?<StoryOutlineBoard data={outlineData} setData={setOutlineData} scenes={sceneData.scenes||[]} onCreateScene={createSceneFromOutline}/>:tab==='scene'?<GeneralScenePlanner data={sceneData} setData={setSceneData}/>:<StoryPatternLibrary data={patternData} setData={setPatternData}/>} 
+    <div className="story-tools-tabs"><button className={'story-tools-tab'+(tab==='blocks'?' active':'')} onClick={()=>setTab('blocks')}>文章の並び</button><button className={'story-tools-tab'+(tab==='outline'?' active':'')} onClick={()=>setTab('outline')}>従来の構成</button><button className={'story-tools-tab'+(tab==='scene'?' active':'')} onClick={()=>setTab('scene')}>シーン補助</button><button className={'story-tools-tab'+(tab==='patterns'?' active':'')} onClick={()=>setTab('patterns')}>物語パターン集</button></div>
+    {tab==='blocks'?<WritingBlockOverview data={data} setData={setData}/>:tab==='outline'?<StoryOutlineBoard data={outlineData} setData={setOutlineData} scenes={sceneData.scenes||[]} onCreateScene={createSceneFromOutline}/>:tab==='scene'?<GeneralScenePlanner data={sceneData} setData={setSceneData}/>:<StoryPatternLibrary data={patternData} setData={setPatternData}/>} 
   </div>;
 }
 
@@ -8131,7 +8245,7 @@ function App(){
   } else if(screen==='plot'){
     body = <Plot data={data} setData={setData} allChars={allChars} allLocations={allLocations} />;
   } else if(screen==='storyTools'){
-    body = <StoryToolsScreen outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} />;
+    body = <StoryToolsScreen data={data} setData={setData} outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} />;
   } else if(screen==='writing'){
     body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} />;
   } else if(screen==='aiimport'){
