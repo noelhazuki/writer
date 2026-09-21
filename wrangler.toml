@@ -9,4 +9,4 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "novel-builder-db"
-database_id = "ここをD1のdatabase_idへ置き換える"
+database_id = "6207b334-f249-4485-b44a-8025e00ee227"
