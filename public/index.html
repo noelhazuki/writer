@@ -1775,6 +1775,9 @@ function initialData(){
     ideas: [],
     plot: { structureType: '自由構成', chapters: [] },
     writings: [],
+    draftingText: '',
+    savedPassages: [],
+    sceneMaps: [],
     entityRelations: [],
   };
 }
@@ -1782,6 +1785,9 @@ function initialData(){
 // 既存データを壊さないための不足フィールド補完。
 // 新しく追加した項目が無い旧データでも安全に動作するようにする。
 function migrateData(parsed){
+  parsed.draftingText=String(parsed.draftingText||'');
+  parsed.savedPassages=Array.isArray(parsed.savedPassages)?parsed.savedPassages.map(p=>({...p,id:p.id||uid('passage'),title:String(p.title||'無題の塊'),body:String(p.body||''),memo:String(p.memo||''),version:String(p.version||'ver1')})):[];
+  parsed.sceneMaps=Array.isArray(parsed.sceneMaps)?parsed.sceneMaps.map(m=>({...m,id:m.id||uid('map'),title:String(m.title||'新しい話'),items:Array.isArray(m.items)?m.items.map(i=>({...i,id:i.id||uid('mapitem'),title:String(i.title||''),memo:String(i.memo||'')})):[]})):[];
   if(!parsed.worldSettings) parsed.worldSettings = initialData().worldSettings;
   if(!parsed.plot) parsed.plot = { structureType:'自由構成', chapters: [] };
   if(!parsed.writings) parsed.writings = [];
@@ -4177,6 +4183,10 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const [activeBlockId,setActiveBlockId]=useState(null);
   const [blockDraft,setBlockDraft]=useState(null);
   const [readAll,setReadAll]=useState(false);
+  const [workspaceTab,setWorkspaceTab]=useState('draft');
+  const [passageDraft,setPassageDraft]=useState(null);
+  const [mapDraft,setMapDraft]=useState(null);
+  const [mapImport,setMapImport]=useState('');
   const [writingFontSize, setWritingFontSizeState] = useState(loadWritingFontSize);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [dictEditorOpen, setDictEditorOpen] = useState(false);
@@ -4233,6 +4243,32 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     updateBlocks(chapter.id,rows=>{const next=[...rows];next.splice(index,0,b);return next;});
     setActiveBlockId(b.id);setReadAll(false);setFocusMode(false);
   };
+  const savePassage=(body,title,memo='',version='ver1')=>{
+    if(!body.trim())return;
+    setData(d=>({...d,savedPassages:[...(d.savedPassages||[]),{id:uid('passage'),title:title.trim()||'無題の塊',body,memo,version}]}));
+  };
+  const selectedDraftText=()=>{
+    const el=document.getElementById('drafting-area'),body=data.draftingText||'';
+    return el&&el.selectionStart!==el.selectionEnd?body.slice(el.selectionStart,el.selectionEnd):body;
+  };
+  const placePassage=(passage,chapter)=>{
+    const block={id:uid('wblock'),title:passage.title,body:passage.body,memo:passage.memo,kind:'normal',status:'執筆中',adultNote:''};
+    updateBlocks(chapter.id,rows=>[...rows,block]);
+    setOpenId(chapter.id);setActiveBlockId(block.id);setReadAll(false);setWorkspaceTab('draft');
+  };
+  const restorePassage=(passage)=>{
+    if(!openChapter||!activeBlock)return;
+    if(!confirm(`現在の「${activeBlock.title}」を ${passage.title}（${passage.version}）の内容に置き換えますか？ 必要なら先に現在の塊を保管棚へ保存してください。`))return;
+    updateBlocks(openChapter.id,rows=>rows.map(b=>b.id===activeBlock.id?{...b,body:passage.body,title:passage.title,memo:passage.memo}:b));
+  };
+  const importSceneMap=()=>{
+    try{
+      const parsed=JSON.parse(mapImport), maps=Array.isArray(parsed)?parsed:[parsed];
+      if(!maps.length||!maps.every(m=>m&&typeof m.title==='string'&&Array.isArray(m.items)&&m.items.every(i=>typeof i==='string'||(i&&typeof i.title==='string'))))throw Error('形式を確認してください');
+      setData(d=>({...d,sceneMaps:[...(d.sceneMaps||[]),...maps.map(m=>({id:uid('map'),title:m.title,items:m.items.map(i=>({id:uid('mapitem'),title:typeof i==='string'?i:i.title,memo:typeof i==='string'?'':String(i.memo||'')}))}))]}));
+      setMapImport('');alert('地図を追加しました。');
+    }catch(e){alert('JSON形式を確認してください。title と items が必要です。');}
+  };
   const moveBlock=(chapter,index,delta)=>updateBlocks(chapter.id,rows=>{
     const next=[...rows],to=index+delta;
     if(to<0||to>=next.length)return rows;
@@ -4256,6 +4292,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const open=openChapter&&activeBlock?{...openChapter,body:activeBlock.body}:null;
   const blockBoard=openChapter&&<div className="writing-block-board">
     <div className="writing-block-toolbar"><strong>文章ブロック</strong><button className="btn btn-sm" onClick={()=>setReadAll(x=>!x)}>{readAll?'編集に戻る':'通して読む'}</button></div>
+    {!readAll&&activeBlock&&<button className="btn btn-sm" onClick={()=>{const version=prompt('保存する版の名前', 'ver2');if(version!==null)savePassage(activeBlock.body,activeBlock.title,activeBlock.memo,version)}}>編集中の塊を保管棚へ保存</button>}
+    {!readAll&&activeBlock&&(data.savedPassages||[]).length>0&&<details><summary>保管棚からこの塊に戻す</summary>{data.savedPassages.map(p=><button key={p.id} className="btn btn-sm" onClick={()=>restorePassage(p)}>{p.title}（{p.version}）</button>)}</details>}
     {readAll?<div className="writing-block-read">{openChapter.blocks.map(b=><section key={b.id}><h3>{b.title}</h3>{b.body?<div className="writing-block-prose">{b.body}</div>:<p className="writing-block-placeholder">ここに書く場面：{b.memo||'未定'}</p>}</section>)}</div>:<>
       <button className="writing-block-insert" onClick={()=>insertBlock(openChapter,0)}>＋ 先頭に場面を挿入</button>
       {openChapter.blocks.map((b,i)=><React.Fragment key={b.id}><div className={'writing-block-card'+(activeBlock&&b.id===activeBlock.id?' active':'')}>
@@ -4589,6 +4627,31 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         <div className="filler" />
         <button className="btn btn-primary" onClick={addChapter}>＋ 章を追加</button>
       </div>
+      <div className="story-tools-tabs">
+        <button className={'story-tools-tab'+(workspaceTab==='draft'?' active':'')} onClick={()=>setWorkspaceTab('draft')}>下書き</button>
+        <button className={'story-tools-tab'+(workspaceTab==='shelf'?' active':'')} onClick={()=>setWorkspaceTab('shelf')}>塊の保管棚</button>
+        <button className={'story-tools-tab'+(workspaceTab==='map'?' active':'')} onClick={()=>setWorkspaceTab('map')}>シーンの地図</button>
+      </div>
+      {workspaceTab==='draft'&&<div className="writing-block-board">
+        <p className="adult-tab-desc">順番を気にせず書く場所です。選択した範囲、または全文を塊として保存できます。</p>
+        <textarea id="drafting-area" className="writing-body-area" value={data.draftingText||''} onChange={e=>setData(d=>({...d,draftingText:e.target.value}))} placeholder="思いついた文章をここに…" />
+        <div className="toolbar"><button className="btn btn-primary" onClick={()=>{const body=selectedDraftText();if(!body.trim())return;setPassageDraft({title:'新しい塊',body,memo:'',version:'ver1',fromDraft:true})}}>選択範囲／全文を塊として保存</button>{data.writings.map(w=><button className="btn btn-sm" key={w.id} onClick={()=>{const body=selectedDraftText();if(body.trim())placePassage({title:'下書きからの場面',body,memo:''},w)}}>{w.title}へ直接置く</button>)}</div>
+      </div>}
+      {workspaceTab==='shelf'&&<div className="writing-block-board">
+        <p className="adult-tab-desc">本文へ置くと文章がコピーされます。保管した版はそのまま残ります。</p>
+        {(data.savedPassages||[]).map(p=><div className="writing-block-card" key={p.id}><div><strong>{p.title}（{p.version}）</strong><p>{p.memo||p.body.slice(0,100)}</p><small>{p.body.length}文字</small></div><div className="writing-block-actions"><button className="btn btn-sm" onClick={()=>setPassageDraft({...p,fromDraft:true,version:'ver2'})}>見て新しい版を保存</button>{data.writings.map(w=><button key={w.id} className="btn btn-sm" onClick={()=>placePassage(p,w)}>{w.title}へコピー</button>)}<button className="btn btn-sm btn-danger" onClick={()=>{if(confirm('保管棚から削除しますか？'))setData(d=>({...d,savedPassages:d.savedPassages.filter(x=>x.id!==p.id)}))}}>削除</button></div></div>)}
+        {!(data.savedPassages||[]).length&&<div className="empty-hint">保存した塊がここに並びます。</div>}
+      </div>}
+      {workspaceTab==='map'&&<div className="writing-block-board">
+        <p className="adult-tab-desc">話の道筋を置く地図です。本文の順番とは独立しています。</p>
+        <button className="btn btn-primary" onClick={()=>setData(d=>({...d,sceneMaps:[...(d.sceneMaps||[]),{id:uid('map'),title:'新しい話',items:[]}]}))}>＋ 地図を追加</button>
+        {(data.sceneMaps||[]).map(m=><section key={m.id}><div className="toolbar"><input value={m.title} aria-label="地図のタイトル" onChange={e=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id===m.id?{...x,title:e.target.value}:x)}))}/><button className="btn btn-sm" onClick={()=>{if(confirm('この地図を削除しますか？'))setData(d=>({...d,sceneMaps:d.sceneMaps.filter(x=>x.id!==m.id)}))}}>地図を削除</button></div>
+          {m.items.map((item,i)=><div className="writing-block-card" key={item.id}><button className="writing-block-select" onClick={()=>setMapDraft({mapId:m.id,item:{...item}})}><strong>{item.title||'未定の場面'}</strong><span>{item.memo}</span></button><div className="writing-block-actions"><button className="btn btn-sm" disabled={!i} onClick={()=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:x.items.map((y,j)=>j===i-1?x.items[i]:j===i?x.items[i-1]:y)})}))}>↑</button><button className="btn btn-sm" disabled={i===m.items.length-1} onClick={()=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:x.items.map((y,j)=>j===i+1?x.items[i]:j===i?x.items[i+1]:y)})}))}>↓</button><button className="btn btn-sm" onClick={()=>{if(confirm('この項目を削除しますか？'))setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:x.items.filter(y=>y.id!==item.id)})}))}}>×</button></div></div>)}
+          <button className="writing-block-insert" onClick={()=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:[...x.items,{id:uid('mapitem'),title:'新しい出来事',memo:''}]})}))}>＋ 出来事を追加</button></section>)}
+        <h3>JSONで地図を追加</h3><p className="adult-tab-desc">例：<code>{'{"title":"第1話","items":[{"title":"研究所消滅","memo":"伏せる情報"},"船員紹介"]}'}</code></p><textarea rows="5" style={{width:'100%'}} value={mapImport} onChange={e=>setMapImport(e.target.value)}/><button className="btn btn-sm" onClick={importSceneMap}>JSONを読み込む</button>
+      </div>}
+      {passageDraft&&<Modal title="塊の保存" onClose={()=>setPassageDraft(null)} wide><div className="field-row"><label>見出し</label><input value={passageDraft.title} onChange={e=>setPassageDraft(d=>({...d,title:e.target.value}))}/></div><div className="field-row"><label>版</label><input value={passageDraft.version} onChange={e=>setPassageDraft(d=>({...d,version:e.target.value}))}/></div><div className="field-row"><label>メモ</label><textarea rows="3" value={passageDraft.memo} onChange={e=>setPassageDraft(d=>({...d,memo:e.target.value}))}/></div><div className="field-row"><label>文章</label><textarea rows="12" style={{width:'100%'}} value={passageDraft.body} onChange={e=>setPassageDraft(d=>({...d,body:e.target.value}))}/></div><div className="modal-actions"><button className="btn" onClick={()=>setPassageDraft(null)}>キャンセル</button><button className="btn btn-primary" onClick={()=>{if(!passageDraft.body.trim())return;setData(d=>({...d,savedPassages:passageDraft.fromDraft?[...d.savedPassages,{id:uid('passage'),title:passageDraft.title,body:passageDraft.body,memo:passageDraft.memo,version:passageDraft.version}]:d.savedPassages.map(x=>x.id===passageDraft.id?passageDraft:x)}));setPassageDraft(null)}}>保存</button></div></Modal>}
+      {mapDraft&&<Modal title="地図の出来事" onClose={()=>setMapDraft(null)}><div className="field-row"><label>見出し</label><input value={mapDraft.item.title} onChange={e=>setMapDraft(d=>({...d,item:{...d.item,title:e.target.value}}))}/></div><div className="field-row"><label>自由メモ</label><textarea rows="8" value={mapDraft.item.memo} onChange={e=>setMapDraft(d=>({...d,item:{...d.item,memo:e.target.value}}))}/></div><div className="modal-actions"><button className="btn" onClick={()=>setMapDraft(null)}>キャンセル</button><button className="btn btn-primary" onClick={()=>{setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==mapDraft.mapId?x:{...x,items:x.items.map(i=>i.id===mapDraft.item.id?mapDraft.item:i)})}));setMapDraft(null)}}>保存</button></div></Modal>}
       {data.writings.length===0 && <div className="empty-hint">まだ本文がありません。「＋ 章を追加」から書き始められます。</div>}
       {data.writings.map(w=>(
         <div className="writing-list-row" key={w.id} onClick={()=>{setOpenId(w.id);setActiveBlockId(w.blocks&&w.blocks[0]&&w.blocks[0].id);setReadAll(false)}} style={{cursor:'pointer'}}>
