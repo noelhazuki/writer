@@ -780,16 +780,19 @@ const NAV_ITEMS = [
   { key:'adultTools', label:'成人向け創作', icon:'🔞' },
 ];
 
-// スマホ下部ナビ（5項目固定・横スクロールなし）。NAV_ITEMSはPC左サイドバー用のため変更せず、表示専用に別定義する。
+// スマホ下部ナビ（5項目固定・横スクロールなし）：ホーム／下書き／本文／地図／総合。
+// 「下書き」「本文」「地図」はいずれも画面としては screen==='writing'（Writing画面）で、
+// writingTab（App側で保持）だけが異なる。NAV_ITEMSはPC左サイドバー用のため変更せず、表示専用に別定義する。
 const MOBILE_TAB_ITEMS = [
   { key:'dashboard', label:'ホーム', icon:'🏠' },
-  { key:'characters', label:'人物', icon:'🧑' },
-  { key:'writing', label:'本文', icon:'✍️', primary:true },
-  { key:'plot', label:'プロット', icon:'🧩' },
-  { key:'more', label:'その他', icon:'☰' },
+  { key:'draft', label:'下書き', icon:'📝', writingTab:'draft' },
+  { key:'chapters', label:'本文', icon:'✍️', writingTab:'chapters', primary:true },
+  { key:'map', label:'地図', icon:'🗺️', writingTab:'map' },
+  { key:'more', label:'総合', icon:'☰' },
 ];
-// 「その他」ボトムシートに表示する画面（NAV_ITEMSのラベル/アイコンをそのまま流用）
-const MORE_SCREEN_KEYS = ['organizations','locations','worldsettings','timeline','ideas','storyTools','aiimport','adultTools'];
+// 「総合」ボトムシートに表示する画面（NAV_ITEMSのラベル/アイコンをそのまま流用）
+// 人物・組織・場所・世界設定・年表・ネタ箱・従来のプロット・従来の構成／物語パターン集（storyTools内）・一括取り込み・成人向け創作
+const MORE_SCREEN_KEYS = ['characters','organizations','locations','worldsettings','timeline','ideas','plot','storyTools','aiimport','adultTools'];
 const isMoreScreen = (screen) => MORE_SCREEN_KEYS.includes(screen);
 
 const DEFAULT_WS_CATEGORIES = [
@@ -4178,12 +4181,22 @@ function Plot({ data, setData, allChars, allLocations }){
 }
 
 /* ============ 本文 ============ */
-function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds }){
+function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId }){
   const [openId, setOpenId] = useState(null);
+  // 検索結果などから特定の章を直接開きたいとき（openChapterIdが変化するたび）に本文タブへ切り替えて開く。
+  useEffect(()=>{
+    if(!openChapterId) return;
+    const w = (data.writings||[]).find(x=>x.id===openChapterId);
+    if(!w) return;
+    setWorkspaceTab('chapters');
+    setOpenId(w.id);
+    setActiveBlockId(w.blocks && w.blocks[0] && w.blocks[0].id);
+    setReadAll(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openChapterId]);
   const [activeBlockId,setActiveBlockId]=useState(null);
   const [blockDraft,setBlockDraft]=useState(null);
   const [readAll,setReadAll]=useState(false);
-  const [workspaceTab,setWorkspaceTab]=useState('draft');
   const [passageDraft,setPassageDraft]=useState(null);
   const [mapDraft,setMapDraft]=useState(null);
   const [mapImport,setMapImport]=useState('');
@@ -4209,7 +4222,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   // 通常モード：bottom-tabsの実高さの上へ。集中モード：クイック表現バーの実高さの上へ。
   // どちらもソフトウェアキーボード表示中はvisualViewportで隠れた分だけさらに押し上げる。
   const bottomTabsHeight = useSelectorHeight('.bottom-tabs', !focusMode);
-  const quickbarHeight = useMeasuredHeight(quickbarWrapRef, [focusMode, openId]);
+  const quickbarHeight = useMeasuredHeight(quickbarWrapRef, [focusMode, openId, workspaceTab]);
   const keyboardInset = useKeyboardInset();
   const paletteBottomOffset = (focusMode ? quickbarHeight : bottomTabsHeight) + keyboardInset;
 
@@ -4241,21 +4254,23 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const insertBlock=(chapter,index)=>{
     const b={id:uid('wblock'),title:'新しい場面',body:'',memo:'',kind:'normal',status:'未定',adultNote:''};
     updateBlocks(chapter.id,rows=>{const next=[...rows];next.splice(index,0,b);return next;});
-    setActiveBlockId(b.id);setReadAll(false);setFocusMode(false);
+    setActiveBlockId(b.id);setReadAll(false);
   };
   const savePassage=(body,title,memo='',version='ver1')=>{
     if(!body.trim())return;
     setData(d=>({...d,savedPassages:[...(d.savedPassages||[]),{id:uid('passage'),title:title.trim()||'無題の塊',body,memo,version}]}));
   };
   const selectedDraftText=()=>{
-    const el=document.getElementById('drafting-area'),body=data.draftingText||'';
+    const el=textareaRef.current,body=data.draftingText||'';
     return el&&el.selectionStart!==el.selectionEnd?body.slice(el.selectionStart,el.selectionEnd):body;
   };
+  // 保管棚の塊を、指定した章の末尾へ新しい場面として「コピー」する。保管元（保管棚）と本文は同期しない。
   const placePassage=(passage,chapter)=>{
-    const block={id:uid('wblock'),title:passage.title,body:passage.body,memo:passage.memo,kind:'normal',status:'執筆中',adultNote:''};
+    const block={id:uid('wblock'),title:passage.title,body:passage.body,memo:passage.memo||'',kind:'normal',status:'執筆中',adultNote:''};
     updateBlocks(chapter.id,rows=>[...rows,block]);
-    setOpenId(chapter.id);setActiveBlockId(block.id);setReadAll(false);setWorkspaceTab('draft');
+    setWorkspaceTab('chapters');setOpenId(chapter.id);setActiveBlockId(block.id);setReadAll(false);
   };
+  // 保管棚の版（例：ver1）で、いま選んでいる場面をまるごと置き換える
   const restorePassage=(passage)=>{
     if(!openChapter||!activeBlock)return;
     if(!confirm(`現在の「${activeBlock.title}」を ${passage.title}（${passage.version}）の内容に置き換えますか？ 必要なら先に現在の塊を保管棚へ保存してください。`))return;
@@ -4284,20 +4299,25 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     updateBlocks(chapter.id,rows=>rows.filter(b=>b.id!==block.id));
     if(activeBlockId===block.id)setActiveBlockId(chapter.blocks.find(b=>b.id!==block.id).id);
   };
-  const remove = (id) => { if(confirm('この章を削除しますか？')){ setData(d=>({...d, writings: d.writings.filter(w=>w.id!==id)})); setOpenId(null); setFocusMode(false); setPaletteOpen(false); setExprDictOpen(false); setWritingMoreOpen(false); } };
-  const backToList = () => { setOpenId(null); setFocusMode(false); setPaletteOpen(false); setExprDictOpen(false); setWritingMoreOpen(false); };
+  const remove = (id) => { if(confirm('この章を削除しますか？')){ setData(d=>({...d, writings: d.writings.filter(w=>w.id!==id)})); setOpenId(null); setWritingMoreOpen(false); } };
+  const backToList = () => { setOpenId(null); setWritingMoreOpen(false); };
 
   const openChapter = openId ? data.writings.find(w=>w.id===openId) : null;
   const activeBlock=openChapter&&(openChapter.blocks||[]).find(b=>b.id===activeBlockId)||(openChapter&&openChapter.blocks&&openChapter.blocks[0]);
   const open=openChapter&&activeBlock?{...openChapter,body:activeBlock.body}:null;
-  const blockBoard=openChapter&&<div className="writing-block-board">
-    <div className="writing-block-toolbar"><strong>文章ブロック</strong><button className="btn btn-sm" onClick={()=>setReadAll(x=>!x)}>{readAll?'編集に戻る':'通して読む'}</button></div>
-    {!readAll&&activeBlock&&<button className="btn btn-sm" onClick={()=>{const version=prompt('保存する版の名前', 'ver2');if(version!==null)savePassage(activeBlock.body,activeBlock.title,activeBlock.memo,version)}}>編集中の塊を保管棚へ保存</button>}
-    {!readAll&&activeBlock&&(data.savedPassages||[]).length>0&&<details><summary>保管棚からこの塊に戻す</summary>{data.savedPassages.map(p=><button key={p.id} className="btn btn-sm" onClick={()=>restorePassage(p)}>{p.title}（{p.version}）</button>)}</details>}
+
+  // ---- 下書き（自由に書いて推敲する場所）の本体。章とは独立した1本のテキスト ----
+  const draftBody = data.draftingText || '';
+  const setDraftBody = (text) => setData(d=>({...d, draftingText:text}));
+
+  const blockBoard = openChapter&&<div className="writing-block-board">
+    <div className="writing-block-toolbar"><strong>文章ブロック</strong><button className="btn btn-sm" onClick={()=>setReadAll(x=>!x)}>{readAll?'一覧に戻る':'通して読む'}</button></div>
+    {!readAll&&activeBlock&&<button className="btn btn-sm" onClick={()=>{const version=prompt('保存する版の名前', 'ver2');if(version!==null)savePassage(activeBlock.body,activeBlock.title,activeBlock.memo,version)}}>この場面を塊として保管棚へ保存</button>}
+    {!readAll&&activeBlock&&(data.savedPassages||[]).length>0&&<details><summary>保管棚からこの場面に戻す</summary>{data.savedPassages.map(p=><button key={p.id} className="btn btn-sm" onClick={()=>restorePassage(p)}>{p.title}（{p.version}）</button>)}</details>}
     {readAll?<div className="writing-block-read">{openChapter.blocks.map(b=><section key={b.id}><h3>{b.title}</h3>{b.body?<div className="writing-block-prose">{b.body}</div>:<p className="writing-block-placeholder">ここに書く場面：{b.memo||'未定'}</p>}</section>)}</div>:<>
       <button className="writing-block-insert" onClick={()=>insertBlock(openChapter,0)}>＋ 先頭に場面を挿入</button>
       {openChapter.blocks.map((b,i)=><React.Fragment key={b.id}><div className={'writing-block-card'+(activeBlock&&b.id===activeBlock.id?' active':'')}>
-        <button className="writing-block-select" onClick={()=>{setActiveBlockId(b.id);setFocusMode(false)}}><strong>{b.title}</strong><small>{b.status}・{b.body.length}文字{b.kind==='adult'?'・成人向け':''}</small><span>{b.body.slice(0,90)||b.memo||'本文未入力'}</span></button>
+        <button className="writing-block-select" onClick={()=>{setActiveBlockId(b.id)}}><strong>{b.title}</strong><small>{b.status}・{b.body.length}文字{b.kind==='adult'?'・成人向け':''}</small><span>{b.body.slice(0,90)||b.memo||'本文未入力'}</span></button>
         <div className="writing-block-actions"><button className="btn btn-sm" onClick={()=>setBlockDraft({...b})}>出来事メモ</button><button className="btn btn-sm" onClick={()=>moveBlock(openChapter,i,-1)} disabled={i===0} aria-label="上へ移動">↑</button><button className="btn btn-sm" onClick={()=>moveBlock(openChapter,i,1)} disabled={i===openChapter.blocks.length-1} aria-label="下へ移動">↓</button><button className="btn btn-sm btn-danger" onClick={()=>removeBlock(openChapter,b)} disabled={openChapter.blocks.length<2} aria-label="ブロックを削除">×</button></div>
       </div><button className="writing-block-insert" onClick={()=>insertBlock(openChapter,i+1)}>＋ ここに場面を挿入</button></React.Fragment>)}
     </>}
@@ -4314,10 +4334,11 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const locOptions = allLocations.map(l=>({id:l.id,label:l.name||'（無名）'}));
   const ideaOptions = data.ideas.map(i=>({id:i.id,label:(i.content||'').slice(0,20)||'（無題）'}));
 
-  // ---- 表現パレット：カーソル位置とスクロール位置を保ったまま本文へ挿入するためのヘルパー ----
-  // savedSelectionRef / savedScrollRef を「本文上で最後に確定していた状態」のSingle Source of Truthとして扱う。
+  // ---- 表現パレット：カーソル位置とスクロール位置を保ったまま「下書き」へ挿入するためのヘルパー ----
+  // savedSelectionRef / savedScrollRef を「下書き上で最後に確定していた状態」のSingle Source of Truthとして扱う。
   // textarea操作（onSelect/onClick/onKeyUp/onBlur）と、パレット系ボタンのpointerdown（preventFocusSteal）の
   // 両方でここへ常時同期し、挿入処理はDOMの現在値ではなく必ずこのrefを参照する。
+  // 表現パレット・各辞典は「下書き」専用（採用仕様：本文の文章は直接編集しない）。
   const rememberEditorState = () => {
     const el = textareaRef.current;
     if(el && typeof el.selectionStart === 'number'){
@@ -4336,12 +4357,12 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
 
   const preventFocusSteal = (e) => {
     e.preventDefault();
-    // ボタンタップでフォーカスが奪われる直前＝本文が最後に確定していた状態をここで確定させる
+    // ボタンタップでフォーカスが奪われる直前＝下書きが最後に確定していた状態をここで確定させる
     rememberEditorState();
   };
 
   const getSelection = (bodyLen) => {
-    // DOM上の現在値ではなく、savedSelectionRef（最後に本文上で確定していたカーソル位置）を基準にする
+    // DOM上の現在値ではなく、savedSelectionRef（最後に下書き上で確定していたカーソル位置）を基準にする
     let { start, end } = savedSelectionRef.current;
     start = Math.max(0, Math.min(start ?? bodyLen, bodyLen));
     end = Math.max(0, Math.min(end ?? start, bodyLen));
@@ -4372,12 +4393,12 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   };
 
   const insertIntoBody = (text) => {
-    if(!open || !text) return;
-    const body = open.body || '';
+    if(!text) return;
+    const body = draftBody;
     const { start, end } = getSelection(body.length);
     const newBody = body.slice(0, start) + text + body.slice(end);
     const newPos = start + text.length;
-    update(open.id, { body: newBody });
+    setDraftBody(newBody);
     savedSelectionRef.current = { start:newPos, end:newPos };
     restoreFocusAndSelection(newPos);
   };
@@ -4410,7 +4431,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     restoreFocusAndSelection(savedSelectionRef.current.start);
   };
 
-  const paletteBlock = open && paletteOpen ? (
+  const paletteBlock = paletteOpen ? (
     <SnippetPalette
       categories={writingSnippets.categories}
       snippets={writingSnippets.snippets}
@@ -4426,8 +4447,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     <WritingSnippetDictionaryModal writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} onClose={closeDictEditor} />
   ) : null;
 
-  // ---- 辞典ドロワー（参照パネル）。[表現辞典][小説語彙][メディア語]をdictTabで切り替える。いずれも候補は本文へ挿入せず、コピー中心 ----
-  const exprDictBlock = open && exprDictOpen ? (
+  // ---- 辞典ドロワー（参照パネル）。[表現辞典][小説語彙][メディア語]をdictTabで切り替える。いずれも候補は下書きへ挿入せず、コピー中心 ----
+  const exprDictBlock = exprDictOpen ? (
     dictTab==='special' ? (
       <SpecialDictionaryPanel
         dictionary={specialDictionary}
@@ -4493,27 +4514,29 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [memoOpenSignal, focusMode]);
 
-  // ---- スマホ「⋯」：文字サイズ／メモ・関連情報を開く／章を削除（低頻度操作をここへ集約） ----
-  const writingMoreBlock = open && writingMoreOpen ? (
+  // ---- スマホ「⋯」：下書きタブでは文字サイズのみ、本文（章）タブでは文字サイズ／メモ・関連情報／章削除 ----
+  const writingMoreBlock = writingMoreOpen ? (
     <div className="wmore-backdrop" onClick={()=>setWritingMoreOpen(false)}>
       <div className="wmore-sheet" onClick={e=>e.stopPropagation()}>
-        <div className="wmore-head"><span>本文の操作</span><button type="button" className="btn btn-sm btn-ghost" onClick={()=>setWritingMoreOpen(false)}>×</button></div>
+        <div className="wmore-head"><span>{workspaceTab==='draft'?'下書きの操作':'本文の操作'}</span><button type="button" className="btn btn-sm btn-ghost" onClick={()=>setWritingMoreOpen(false)}>×</button></div>
         <div className="wmore-fontsize-row">
           <span className="wmore-fontsize-label">文字サイズ</span>
           <FontSizeControl value={writingFontSize} onChange={setWritingFontSize} />
         </div>
-        <div className="wmore-sep" />
-        <button type="button" className="wmore-item" onClick={openMemoSection}>メモ・関連情報を開く</button>
-        <div className="wmore-sep" />
-        <button type="button" className="wmore-item wmore-danger" onClick={()=>{ setWritingMoreOpen(false); remove(open.id); }}>章を削除</button>
+        {workspaceTab!=='draft' && open && <>
+          <div className="wmore-sep" />
+          <button type="button" className="wmore-item" onClick={openMemoSection}>メモ・関連情報を開く</button>
+          <div className="wmore-sep" />
+          <button type="button" className="wmore-item wmore-danger" onClick={()=>{ setWritingMoreOpen(false); remove(open.id); }}>章を削除</button>
+        </>}
       </div>
     </div>
   ) : null;
 
 
-  // ---- クイック表現バー：辞書に★（pinned）登録された語だけを、開閉なしで常時1タップ挿入 ----
+  // ---- クイック表現バー：辞書に★（pinned）登録された語だけを、開閉なしで常時1タップ挿入（下書き専用） ----
   const pinnedSnippets = writingSnippets.snippets.filter(s=>s.pinned).sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0));
-  const quickbarBlock = open ? (
+  const quickbarBlock = workspaceTab==='draft' ? (
     <div ref={quickbarWrapRef}>
       <QuickExpressionBar
         snippets={pinnedSnippets}
@@ -4527,7 +4550,10 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     </div>
   ) : null;
 
-  if(open && focusMode){
+  // ============================================================
+  // 下書き：集中モード（自由に書いて推敲する場所。章とは独立）
+  // ============================================================
+  if(workspaceTab==='draft' && focusMode){
     return (
       <div className="writing-focus">
         <div className="writing-focus-header">
@@ -4535,8 +4561,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
             <button type="button" className="writing-back-btn" onClick={()=>setFocusMode(false)} title="集中モードを終了" aria-label="集中モードを終了">
               <span className="wh-back-full">← 集中終了</span><span className="wh-back-short">←</span>
             </button>
-            <input className="writing-focus-title" value={open.title} onChange={e=>update(open.id,{title:e.target.value})} placeholder="章タイトル" />
-            <span className="wordcount">{open.body.length.toLocaleString()} 文字</span>
+            <div className="writing-focus-title" style={{fontWeight:700}}>下書き</div>
+            <span className="wordcount">{draftBody.length.toLocaleString()} 文字</span>
           </div>
           <div className="writing-header-row2">
             <button type="button" className={"btn btn-sm"+(paletteOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={togglePalette}>
@@ -4550,10 +4576,10 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
           </div>
         </div>
         <div className="writing-focus-body-wrap" ref={focusBodyWrapRef}>
-          <textarea ref={textareaRef} className="writing-body-area writing-body-area-focus" style={{fontSize:writingFontSize}} value={open.body}
-            onChange={e=>{ update(open.id,{body:e.target.value}); rememberEditorState(); }}
+          <textarea ref={textareaRef} className="writing-body-area writing-body-area-focus" style={{fontSize:writingFontSize}} value={draftBody}
+            onChange={e=>{ setDraftBody(e.target.value); rememberEditorState(); }}
             onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState} onBlur={rememberEditorState}
-            placeholder="本文を書く…" autoFocus />
+            placeholder="思いついた文章をここに…" autoFocus />
         </div>
         {!paletteOpen && !exprDictOpen && quickbarBlock}
         {paletteBlock}
@@ -4567,7 +4593,10 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     );
   }
 
-  if(open){
+  // ============================================================
+  // 本文：章の詳細（塊の並び替え・通し読み。文章そのものは直接編集しない）
+  // ============================================================
+  if(workspaceTab==='chapters' && open){
     return (
       <div>
         <div className="writing-header">
@@ -4579,15 +4608,6 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
             <span className="wordcount">{open.body.length.toLocaleString()} 文字</span>
           </div>
           <div className="writing-header-row2">
-            <button className="btn btn-sm" onClick={()=>setFocusMode(true)}>
-              <span className="wh-label-full">集中モード</span><span className="wh-label-short">集中</span>
-            </button>
-            <button type="button" className={"btn btn-sm"+(paletteOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={togglePalette}>
-              <span className="wh-label-full">表現パレット</span><span className="wh-label-short">表現</span>
-            </button>
-            <button type="button" className={"btn btn-sm"+(exprDictOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleExprDict}>
-              <span className="wh-label-full">表現辞典</span><span className="wh-label-short">辞典</span>
-            </button>
             <span className="writing-only-desktop"><FontSizeControl value={writingFontSize} onChange={setWritingFontSize} /></span>
             <button className="btn btn-danger btn-sm writing-only-desktop" onClick={()=>remove(open.id)}>削除</button>
             <button type="button" className="btn btn-sm writing-more-btn writing-only-mobile" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleWritingMore} aria-label="その他の操作" title="その他の操作">⋯</button>
@@ -4595,18 +4615,13 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         </div>
         {blockBoard}
         {blockModal}
-        {readAll?<div className="writing-block-read-note">文章を確認したら「編集に戻る」で本文を編集できます。</div>:<><div className="writing-toolbar-gap" />
-        <textarea ref={textareaRef} className="writing-body-area" style={{fontSize:writingFontSize}} value={open.body}
-          onChange={e=>{ update(open.id,{body:e.target.value}); rememberEditorState(); }}
-          onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState} onBlur={rememberEditorState}
-          placeholder="本文を書く…" />
-        {!paletteOpen && !exprDictOpen && quickbarBlock}
-        {paletteBlock}
-        {exprDictBlock}
-        {dictEditorBlock}
-        {exprDictEditorBlock}
-        {specialDictEditorBlock}
-        {mediaDictEditorBlock}
+        {readAll?<div className="writing-block-read-note">「一覧に戻る」で場面の並びを確認・編集できます。</div>:<><div className="writing-toolbar-gap" />
+        <div className="writing-body-area" style={{fontSize:writingFontSize, whiteSpace:'pre-wrap', cursor:'default'}} aria-readonly="true">
+          {activeBlock&&activeBlock.body ? activeBlock.body : <span className="writing-block-placeholder">まだ本文がありません。下書きで書いて塊として保存し、保管棚からこの場面に戻す（置き換える）か、保管棚から新しい場面としてコピーしてください。</span>}
+        </div>
+        <div className="toolbar" style={{marginTop:10}}>
+          <button className="btn btn-sm" onClick={()=>{ setDraftBody(activeBlock?activeBlock.body:''); setWorkspaceTab('draft'); }}>この場面を下書きへコピーして直す</button>
+        </div>
         {writingMoreBlock}
         <div style={{marginTop:14}} ref={memoSectionRef}>
           <CollapsibleSection title="メモ・関連情報" defaultOpen={false} openSignal={memoOpenSignal}>
@@ -4620,48 +4635,75 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     );
   }
 
+  // ============================================================
+  // タブ切り替え画面（下書き／塊の保管棚／シーンの地図／本文）
+  // ============================================================
   return (
     <div>
       <div className="toolbar">
         <h1>✍️ 本文</h1>
-        <div className="filler" />
-        <button className="btn btn-primary" onClick={addChapter}>＋ 章を追加</button>
       </div>
       <div className="story-tools-tabs">
         <button className={'story-tools-tab'+(workspaceTab==='draft'?' active':'')} onClick={()=>setWorkspaceTab('draft')}>下書き</button>
         <button className={'story-tools-tab'+(workspaceTab==='shelf'?' active':'')} onClick={()=>setWorkspaceTab('shelf')}>塊の保管棚</button>
         <button className={'story-tools-tab'+(workspaceTab==='map'?' active':'')} onClick={()=>setWorkspaceTab('map')}>シーンの地図</button>
+        <button className={'story-tools-tab'+(workspaceTab==='chapters'?' active':'')} onClick={()=>setWorkspaceTab('chapters')}>本文</button>
       </div>
       {workspaceTab==='draft'&&<div className="writing-block-board">
-        <p className="adult-tab-desc">順番を気にせず書く場所です。選択した範囲、または全文を塊として保存できます。</p>
-        <textarea id="drafting-area" className="writing-body-area" value={data.draftingText||''} onChange={e=>setData(d=>({...d,draftingText:e.target.value}))} placeholder="思いついた文章をここに…" />
+        <p className="adult-tab-desc">順番を気にせず書く場所です。選択した範囲、または全文を塊として保存できます。表現パレット・各辞典もここで使えます。</p>
+        <div className="writing-header-row2" style={{marginBottom:8}}>
+          <button className="btn btn-sm" onClick={()=>setFocusMode(true)}><span className="wh-label-full">集中モード</span><span className="wh-label-short">集中</span></button>
+          <button type="button" className={"btn btn-sm"+(paletteOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={togglePalette}>
+            <span className="wh-label-full">表現パレット</span><span className="wh-label-short">表現</span>
+          </button>
+          <button type="button" className={"btn btn-sm"+(exprDictOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleExprDict}>
+            <span className="wh-label-full">表現辞典</span><span className="wh-label-short">辞典</span>
+          </button>
+          <span className="writing-only-desktop"><FontSizeControl value={writingFontSize} onChange={setWritingFontSize} /></span>
+          <button type="button" className="btn btn-sm writing-more-btn writing-only-mobile" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleWritingMore} aria-label="その他の操作" title="その他の操作">⋯</button>
+        </div>
+        <textarea id="drafting-area" ref={textareaRef} className="writing-body-area" style={{fontSize:writingFontSize}} value={draftBody}
+          onChange={e=>{ setDraftBody(e.target.value); rememberEditorState(); }}
+          onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState} onBlur={rememberEditorState}
+          placeholder="思いついた文章をここに…" />
+        {!paletteOpen && !exprDictOpen && quickbarBlock}
         <div className="toolbar"><button className="btn btn-primary" onClick={()=>{const body=selectedDraftText();if(!body.trim())return;setPassageDraft({title:'新しい塊',body,memo:'',version:'ver1',fromDraft:true})}}>選択範囲／全文を塊として保存</button>{data.writings.map(w=><button className="btn btn-sm" key={w.id} onClick={()=>{const body=selectedDraftText();if(body.trim())placePassage({title:'下書きからの場面',body,memo:''},w)}}>{w.title}へ直接置く</button>)}</div>
       </div>}
       {workspaceTab==='shelf'&&<div className="writing-block-board">
-        <p className="adult-tab-desc">本文へ置くと文章がコピーされます。保管した版はそのまま残ります。</p>
+        <p className="adult-tab-desc">本文へ置くと文章がコピーされます。保管元と本文は同期しません。保管した版（ver1、ver2…）はそれぞれ別々に残ります。</p>
         {(data.savedPassages||[]).map(p=><div className="writing-block-card" key={p.id}><div><strong>{p.title}（{p.version}）</strong><p>{p.memo||p.body.slice(0,100)}</p><small>{p.body.length}文字</small></div><div className="writing-block-actions"><button className="btn btn-sm" onClick={()=>setPassageDraft({...p,fromDraft:true,version:'ver2'})}>見て新しい版を保存</button>{data.writings.map(w=><button key={w.id} className="btn btn-sm" onClick={()=>placePassage(p,w)}>{w.title}へコピー</button>)}<button className="btn btn-sm btn-danger" onClick={()=>{if(confirm('保管棚から削除しますか？'))setData(d=>({...d,savedPassages:d.savedPassages.filter(x=>x.id!==p.id)}))}}>削除</button></div></div>)}
         {!(data.savedPassages||[]).length&&<div className="empty-hint">保存した塊がここに並びます。</div>}
       </div>}
       {workspaceTab==='map'&&<div className="writing-block-board">
-        <p className="adult-tab-desc">話の道筋を置く地図です。本文の順番とは独立しています。</p>
+        <p className="adult-tab-desc">話の道筋を置く地図です。本文の順番とは独立しています。「１話の構成」から場面ごとの工程を詳しく設計できます。</p>
         <button className="btn btn-primary" onClick={()=>setData(d=>({...d,sceneMaps:[...(d.sceneMaps||[]),{id:uid('map'),title:'新しい話',items:[]}]}))}>＋ 地図を追加</button>
-        {(data.sceneMaps||[]).map(m=><section key={m.id}><div className="toolbar"><input value={m.title} aria-label="地図のタイトル" onChange={e=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id===m.id?{...x,title:e.target.value}:x)}))}/><button className="btn btn-sm" onClick={()=>{if(confirm('この地図を削除しますか？'))setData(d=>({...d,sceneMaps:d.sceneMaps.filter(x=>x.id!==m.id)}))}}>地図を削除</button></div>
+        {(data.sceneMaps||[]).map(m=><section key={m.id}><div className="toolbar"><input value={m.title} aria-label="地図のタイトル" onChange={e=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id===m.id?{...x,title:e.target.value}:x)}))}/><button className="btn btn-sm" onClick={()=>onOpenSceneTools&&onOpenSceneTools()}>１話の構成を開く</button><button className="btn btn-sm" onClick={()=>{if(confirm('この地図を削除しますか？'))setData(d=>({...d,sceneMaps:d.sceneMaps.filter(x=>x.id!==m.id)}))}}>地図を削除</button></div>
           {m.items.map((item,i)=><div className="writing-block-card" key={item.id}><button className="writing-block-select" onClick={()=>setMapDraft({mapId:m.id,item:{...item}})}><strong>{item.title||'未定の場面'}</strong><span>{item.memo}</span></button><div className="writing-block-actions"><button className="btn btn-sm" disabled={!i} onClick={()=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:x.items.map((y,j)=>j===i-1?x.items[i]:j===i?x.items[i-1]:y)})}))}>↑</button><button className="btn btn-sm" disabled={i===m.items.length-1} onClick={()=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:x.items.map((y,j)=>j===i+1?x.items[i]:j===i?x.items[i+1]:y)})}))}>↓</button><button className="btn btn-sm" onClick={()=>{if(confirm('この項目を削除しますか？'))setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:x.items.filter(y=>y.id!==item.id)})}))}}>×</button></div></div>)}
           <button className="writing-block-insert" onClick={()=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:[...x.items,{id:uid('mapitem'),title:'新しい出来事',memo:''}]})}))}>＋ 出来事を追加</button></section>)}
         <h3>JSONで地図を追加</h3><p className="adult-tab-desc">例：<code>{'{"title":"第1話","items":[{"title":"研究所消滅","memo":"伏せる情報"},"船員紹介"]}'}</code></p><textarea rows="5" style={{width:'100%'}} value={mapImport} onChange={e=>setMapImport(e.target.value)}/><button className="btn btn-sm" onClick={importSceneMap}>JSONを読み込む</button>
       </div>}
+      {workspaceTab==='chapters'&&<div className="writing-block-board">
+        <div className="toolbar"><span className="filler" /><button className="btn btn-primary" onClick={addChapter}>＋ 章を追加</button></div>
+        {data.writings.length===0 && <div className="empty-hint">まだ本文がありません。「＋ 章を追加」から始められます。中に置く場面は「下書き」で書いて「塊の保管棚」経由で入れます。</div>}
+        {data.writings.map(w=>(
+          <div className="writing-list-row" key={w.id} onClick={()=>{setOpenId(w.id);setActiveBlockId(w.blocks&&w.blocks[0]&&w.blocks[0].id);setReadAll(false)}} style={{cursor:'pointer'}}>
+            <div>
+              <div style={{fontWeight:700}}>{w.title}</div>
+              <div style={{fontSize:12, color:'var(--ink-soft)'}}>{w.body.length} 文字</div>
+            </div>
+            <span>開く →</span>
+          </div>
+        ))}
+      </div>}
       {passageDraft&&<Modal title="塊の保存" onClose={()=>setPassageDraft(null)} wide><div className="field-row"><label>見出し</label><input value={passageDraft.title} onChange={e=>setPassageDraft(d=>({...d,title:e.target.value}))}/></div><div className="field-row"><label>版</label><input value={passageDraft.version} onChange={e=>setPassageDraft(d=>({...d,version:e.target.value}))}/></div><div className="field-row"><label>メモ</label><textarea rows="3" value={passageDraft.memo} onChange={e=>setPassageDraft(d=>({...d,memo:e.target.value}))}/></div><div className="field-row"><label>文章</label><textarea rows="12" style={{width:'100%'}} value={passageDraft.body} onChange={e=>setPassageDraft(d=>({...d,body:e.target.value}))}/></div><div className="modal-actions"><button className="btn" onClick={()=>setPassageDraft(null)}>キャンセル</button><button className="btn btn-primary" onClick={()=>{if(!passageDraft.body.trim())return;setData(d=>({...d,savedPassages:passageDraft.fromDraft?[...d.savedPassages,{id:uid('passage'),title:passageDraft.title,body:passageDraft.body,memo:passageDraft.memo,version:passageDraft.version}]:d.savedPassages.map(x=>x.id===passageDraft.id?passageDraft:x)}));setPassageDraft(null)}}>保存</button></div></Modal>}
       {mapDraft&&<Modal title="地図の出来事" onClose={()=>setMapDraft(null)}><div className="field-row"><label>見出し</label><input value={mapDraft.item.title} onChange={e=>setMapDraft(d=>({...d,item:{...d.item,title:e.target.value}}))}/></div><div className="field-row"><label>自由メモ</label><textarea rows="8" value={mapDraft.item.memo} onChange={e=>setMapDraft(d=>({...d,item:{...d.item,memo:e.target.value}}))}/></div><div className="modal-actions"><button className="btn" onClick={()=>setMapDraft(null)}>キャンセル</button><button className="btn btn-primary" onClick={()=>{setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==mapDraft.mapId?x:{...x,items:x.items.map(i=>i.id===mapDraft.item.id?mapDraft.item:i)})}));setMapDraft(null)}}>保存</button></div></Modal>}
-      {data.writings.length===0 && <div className="empty-hint">まだ本文がありません。「＋ 章を追加」から書き始められます。</div>}
-      {data.writings.map(w=>(
-        <div className="writing-list-row" key={w.id} onClick={()=>{setOpenId(w.id);setActiveBlockId(w.blocks&&w.blocks[0]&&w.blocks[0].id);setReadAll(false)}} style={{cursor:'pointer'}}>
-          <div>
-            <div style={{fontWeight:700}}>{w.title}</div>
-            <div style={{fontSize:12, color:'var(--ink-soft)'}}>{w.body.length} 文字</div>
-          </div>
-          <span>開く →</span>
-        </div>
-      ))}
+      {paletteBlock}
+      {exprDictBlock}
+      {dictEditorBlock}
+      {exprDictEditorBlock}
+      {specialDictEditorBlock}
+      {mediaDictEditorBlock}
+      {writingMoreBlock}
     </div>
   );
 }
@@ -6607,8 +6649,11 @@ function WritingBlockOverview({data,setData}){
   </div>;
 }
 
-function StoryToolsScreen({outlineData,setOutlineData,sceneData,setSceneData,patternData,setPatternData,data,setData}){
+function StoryToolsScreen({outlineData,setOutlineData,sceneData,setSceneData,patternData,setPatternData,data,setData,openSceneSignal}){
   const [tab,setTab]=useState('blocks');
+  // 「シーンの地図」から「１話の構成を開く」が押されたとき（openSceneSignalが変化するたび）にこのタブへ切り替える。
+  // 既存データ（generalScenes＝旧シーン補助のデータ）はそのまま使う。
+  useEffect(()=>{ if(openSceneSignal) setTab('scene'); }, [openSceneSignal]);
   const createSceneFromOutline=(projectId,blockId,item)=>{
     const scene=newSceneFromTemplate('basic',item.title||'新しいシーン');
     Object.assign(scene,{purpose:item.summary||'',sceneRole:item.type||'本筋',location:item.location||'',pov:item.pov||'',timeRelation:item.timeRelation||'直後',readerInfo:item.readerInfo||'',characterInfo:item.characterInfo||'',returnToMain:!!item.returnToMain,outlineItemId:item.id});
@@ -6618,7 +6663,7 @@ function StoryToolsScreen({outlineData,setOutlineData,sceneData,setSceneData,pat
   };
   return <div>
     <div className="toolbar"><h1>🎬 シーン・物語設計</h1></div>
-    <div className="story-tools-tabs"><button className={'story-tools-tab'+(tab==='blocks'?' active':'')} onClick={()=>setTab('blocks')}>文章の並び</button><button className={'story-tools-tab'+(tab==='outline'?' active':'')} onClick={()=>setTab('outline')}>従来の構成</button><button className={'story-tools-tab'+(tab==='scene'?' active':'')} onClick={()=>setTab('scene')}>シーン補助</button><button className={'story-tools-tab'+(tab==='patterns'?' active':'')} onClick={()=>setTab('patterns')}>物語パターン集</button></div>
+    <div className="story-tools-tabs"><button className={'story-tools-tab'+(tab==='blocks'?' active':'')} onClick={()=>setTab('blocks')}>文章の並び</button><button className={'story-tools-tab'+(tab==='outline'?' active':'')} onClick={()=>setTab('outline')}>従来の構成</button><button className={'story-tools-tab'+(tab==='scene'?' active':'')} onClick={()=>setTab('scene')}>１話の構成</button><button className={'story-tools-tab'+(tab==='patterns'?' active':'')} onClick={()=>setTab('patterns')}>物語パターン集</button></div>
     {tab==='blocks'?<WritingBlockOverview data={data} setData={setData}/>:tab==='outline'?<StoryOutlineBoard data={outlineData} setData={setOutlineData} scenes={sceneData.scenes||[]} onCreateScene={createSceneFromOutline}/>:tab==='scene'?<GeneralScenePlanner data={sceneData} setData={setSceneData}/>:<StoryPatternLibrary data={patternData} setData={setPatternData}/>} 
   </div>;
 }
@@ -8003,7 +8048,10 @@ function App(){
   const [generalScenes, setGeneralScenes] = useState(loadGeneralScenes); // 汎用シーン案（成人向けシーン進行とは別保存）
   const [storyOutlines, setStoryOutlines] = useState(loadStoryOutlines); // 作品→構成ブロック→出来事の全体構成
   const [storyPatterns, setStoryPatterns] = useState(loadStoryPatterns); // 再利用可能な物語構造リファレンス
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false); // スマホ下部ナビ「その他」ボトムシート
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false); // スマホ下部ナビ「総合」ボトムシート
+  const [writingTab, setWritingTab] = useState('chapters'); // Writing画面のタブ：'draft'|'shelf'|'map'|'chapters'（＝本文）
+  const [sceneToolsSignal, setSceneToolsSignal] = useState(0); // 「シーンの地図」→「１話の構成を開く」の合図
+  const openSceneTools = () => { setScreen('storyTools'); setDetailId(null); setQuery(''); setSceneToolsSignal(s=>s+1); };
   const [syncOpen,setSyncOpen]=useState(false);
   const [syncConfig,setSyncConfig]=useState(loadCloudSyncConfig);
   const [syncState,setSyncState]=useState({phase:'idle',message:'同期キーを設定すると端末間で共有できます。'});
@@ -8308,9 +8356,9 @@ function App(){
   } else if(screen==='plot'){
     body = <Plot data={data} setData={setData} allChars={allChars} allLocations={allLocations} />;
   } else if(screen==='storyTools'){
-    body = <StoryToolsScreen data={data} setData={setData} outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} />;
+    body = <StoryToolsScreen data={data} setData={setData} outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} openSceneSignal={sceneToolsSignal} />;
   } else if(screen==='writing'){
-    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} />;
+    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} />;
   } else if(screen==='aiimport'){
     body = <AiImportScreen data={data} setData={setData} lastImportBackup={lastImportBackup} setLastImportBackup={setLastImportBackup} />;
   } else if(screen==='adultTools'){
@@ -8359,10 +8407,20 @@ function App(){
         <div className="bottom-tabs">
           {MOBILE_TAB_ITEMS.map(t=>{
             const isMore = t.key==='more';
-            const active = !query.trim() && (isMore ? (isMoreScreen(screen) || moreMenuOpen) : screen===t.key);
+            const isWritingSub = !!t.writingTab;
+            const active = !query.trim() && (
+              isMore ? (isMoreScreen(screen) || moreMenuOpen) :
+              isWritingSub ? (screen==='writing' && writingTab===t.writingTab) :
+              screen===t.key
+            );
             return (
               <button key={t.key} className={(active?"active":"")+(t.primary?" bottom-tab-primary":"")}
-                onClick={()=>{ if(isMore){ setMoreMenuOpen(o=>!o); } else { setMoreMenuOpen(false); navigateTo(t.key); } }}>
+                onClick={()=>{
+                  if(isMore){ setMoreMenuOpen(o=>!o); return; }
+                  setMoreMenuOpen(false);
+                  if(isWritingSub){ setScreen('writing'); setWritingTab(t.writingTab); setDetailId(null); setQuery(''); }
+                  else { navigateTo(t.key); }
+                }}>
                 <span className="bt-icon">{t.icon}</span><span className="bt-label">{t.label}</span>
               </button>
             );
@@ -8373,7 +8431,7 @@ function App(){
       {!writingFocusMode && moreMenuOpen && (
         <div className="more-menu-backdrop" onClick={()=>setMoreMenuOpen(false)}>
           <div className="more-menu-sheet" onClick={e=>e.stopPropagation()}>
-            <div className="more-menu-head"><span>その他</span><button type="button" className="btn btn-sm btn-ghost" onClick={()=>setMoreMenuOpen(false)}>×</button></div>
+            <div className="more-menu-head"><span>総合</span><button type="button" className="btn btn-sm btn-ghost" onClick={()=>setMoreMenuOpen(false)}>×</button></div>
             <div className="more-menu-list">
               {MORE_SCREEN_KEYS.map(key=>{
                 const item = NAV_ITEMS.find(n=>n.key===key);
