@@ -347,13 +347,14 @@
   .expr-dict-tag{ font-size:11px; color:var(--ink-soft); background:var(--paper-dim); border-radius:999px; padding:2px 8px; white-space:nowrap; }
   .expr-dict-expr-note{ flex:0 0 100%; font-size:11.5px; color:var(--ink-soft); }
   .expr-dict-insert-btn{ flex:0 0 auto; }
+  .expr-dict-expr-actions{ display:flex; gap:6px; flex:0 0 auto; flex-wrap:wrap; }
   @media (max-width:880px){
     .expr-dict-panel{ max-height:70dvh; }
     .expr-dict-head .label-full{ display:none; }
     .expr-dict-head .label-short{ display:inline; }
     .expr-dict-expr-row{ flex-wrap:wrap; }
     .expr-dict-expr-note{ order:3; }
-    .expr-dict-insert-btn{ order:2; margin-left:auto; }
+    .expr-dict-expr-actions{ order:2; margin-left:auto; }
   }
 
   /* コピー成功トースト（expr-dict-panelは既にposition:fixedなので、それ自体が絶対配置の基準になる。alert()は使わない） */
@@ -1603,8 +1604,12 @@ function defaultAdultSceneFlow(){
     makeSceneFlowItem('after','身体反応','乱れた呼吸、汗、脱力、残る震えを選ぶ','全部盛りにせず一つか二つに絞る',['余韻','呼吸']),
     makeSceneFlowItem('after','会話','直後だから言える一言を置く','冗談、確認、名前、沈黙でもよい',['余韻','会話']),
     makeSceneFlowItem('after','関係性','始まる前と何が変わったか示す','距離、信頼、気まずさ、独占欲など',['変化','関係性']),
-  ],selectedItemIds:[]};
+  ],selectedItemIds:[],plans:[],activePlanId:null};
 }
+// 進行表内の1枚のカード：名称（行為名）とメモ（短い描写）のみ。心情等の固定項目は持たない。
+function makeFlowCard(name,memo){ return {id:uid('flowcard'),name:name||'',memo:memo||''}; }
+// 進行表：カードの自由な並び。開始・終了を区別しない。行為前後の状態は任意入力。
+function makeFlowPlan(title){ return {id:uid('flowplan'),title:title||'新しい進行表',beforeState:'',afterState:'',cards:[]}; }
 function normalizeAdultSceneFlow(raw){
   const fallback=defaultAdultSceneFlow();
   const phases=Array.isArray(raw&&raw.phases)&&raw.phases.length?raw.phases.map((x,i)=>({id:x.id||uid('flowphase'),name:x.name||`段階${i+1}`})):fallback.phases;
@@ -1615,7 +1620,29 @@ function normalizeAdultSceneFlow(raw){
   })).filter(x=>x.text);
   const itemIds=new Set(items.map(x=>x.id));
   const selectedItemIds=Array.isArray(raw&&raw.selectedItemIds)?raw.selectedItemIds.filter(id=>itemIds.has(id)):[];
-  return {schemaVersion:1,phases,items,selectedItemIds};
+
+  // 進行表（行為カードを自由に並べる、複数保存できる道具）。既存のitems/phases/selectedItemIdsとは独立したデータ。
+  let plans;
+  if(raw && Array.isArray(raw.plans)){
+    plans = raw.plans.map(p=>({
+      id: p.id||uid('flowplan'),
+      title: String(p.title||'無題の進行表'),
+      beforeState: String(p.beforeState||''),
+      afterState: String(p.afterState||''),
+      cards: Array.isArray(p.cards) ? p.cards.map(c=>({id:c.id||uid('flowcard'),name:String(c.name||''),memo:String(c.memo||'')})) : [],
+    }));
+  } else {
+    // plansフィールドを持たない旧データ。既存の「今回の流れ」（selectedItemIds）があれば内容を失わないよう
+    // 1件の進行表として引き継ぐ（カード名＝内容、メモ＝補足）。items/phases/selectedItemIds自体は削除しない。
+    plans = selectedItemIds.length ? [{
+      id: uid('flowplan'), title: '旧データから引き継いだ進行表', beforeState:'', afterState:'',
+      cards: selectedItemIds.map(id=>items.find(x=>x.id===id)).filter(Boolean).map(x=>({id:uid('flowcard'),name:x.text,memo:x.note||''})),
+    }] : [];
+  }
+  const planIds = new Set(plans.map(p=>p.id));
+  const activePlanId = (raw && planIds.has(raw.activePlanId)) ? raw.activePlanId : (plans[0] ? plans[0].id : null);
+
+  return {schemaVersion:1,phases,items,selectedItemIds,plans,activePlanId};
 }
 function loadAdultSceneFlow(){
   try{const raw=localStorage.getItem(ADULT_SCENE_FLOW_KEY);if(raw!==null)return normalizeAdultSceneFlow(JSON.parse(raw));}catch(e){}
@@ -4181,7 +4208,7 @@ function Plot({ data, setData, allChars, allLocations }){
 }
 
 /* ============ 本文 ============ */
-function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId }){
+function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, adultDictionary, adultOnomatopoeia, adultSceneFlow, onOpenAdultTools, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId }){
   const [openId, setOpenId] = useState(null);
   // 検索結果などから特定の章を直接開きたいとき（openChapterIdが変化するたび）に本文タブへ切り替えて開く。
   useEffect(()=>{
@@ -4430,6 +4457,11 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     setMediaDictEditorOpen(false);
     restoreFocusAndSelection(savedSelectionRef.current.start);
   };
+  // 成人向け表現辞典・オノマトペ・進行表は、専用の編集モーダルを持たず、既存の「成人向け創作」画面の
+  // 各タブへ遷移して編集する（既存の登録・編集機能をそのまま使う）。遷移時はこのドロワーを閉じる。
+  const goToAdultDict = () => { setExprDictOpen(false); onOpenAdultTools&&onOpenAdultTools('dict'); };
+  const goToOnomatopoeia = () => { setExprDictOpen(false); onOpenAdultTools&&onOpenAdultTools('onomatopoeia'); };
+  const goToSceneFlow = () => { setExprDictOpen(false); onOpenAdultTools&&onOpenAdultTools('sceneFlow'); };
 
   const paletteBlock = paletteOpen ? (
     <SnippetPalette
@@ -4454,6 +4486,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         dictionary={specialDictionary}
         onOpenEditor={openSpecialDictEditor}
         onClose={closeExprDict}
+        onInsert={insertIntoBody}
         preventFocusSteal={preventFocusSteal}
         style={{ bottom: paletteBottomOffset + 'px' }}
         dictTab={dictTab}
@@ -4463,6 +4496,39 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
       <MediaDictionaryPanel
         dictionary={mediaDictionary}
         onOpenEditor={openMediaDictEditor}
+        onClose={closeExprDict}
+        onInsert={insertIntoBody}
+        preventFocusSteal={preventFocusSteal}
+        style={{ bottom: paletteBottomOffset + 'px' }}
+        dictTab={dictTab}
+        onDictTabChange={setDictTab}
+      />
+    ) : dictTab==='adult' ? (
+      <AdultExpressionPanel
+        dictionary={adultDictionary||{entries:[]}}
+        onOpenEditor={goToAdultDict}
+        onClose={closeExprDict}
+        onInsert={insertIntoBody}
+        preventFocusSteal={preventFocusSteal}
+        style={{ bottom: paletteBottomOffset + 'px' }}
+        dictTab={dictTab}
+        onDictTabChange={setDictTab}
+      />
+    ) : dictTab==='onomatopoeia' ? (
+      <OnomatopoeiaPanel
+        dictionary={adultOnomatopoeia||{entries:[]}}
+        onOpenEditor={goToOnomatopoeia}
+        onClose={closeExprDict}
+        onInsert={insertIntoBody}
+        preventFocusSteal={preventFocusSteal}
+        style={{ bottom: paletteBottomOffset + 'px' }}
+        dictTab={dictTab}
+        onDictTabChange={setDictTab}
+      />
+    ) : dictTab==='sceneFlow' ? (
+      <SceneFlowReferencePanel
+        sceneFlow={adultSceneFlow||{plans:[]}}
+        onOpenEditor={goToSceneFlow}
         onClose={closeExprDict}
         preventFocusSteal={preventFocusSteal}
         style={{ bottom: paletteBottomOffset + 'px' }}
@@ -4474,6 +4540,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         dictionary={expressionDictionary}
         onOpenEditor={openExprDictEditor}
         onClose={closeExprDict}
+        onInsert={insertIntoBody}
         preventFocusSteal={preventFocusSteal}
         style={{ bottom: paletteBottomOffset + 'px' }}
         dictTab={dictTab}
@@ -4867,6 +4934,12 @@ function DictTabSwitch({ active, onChange, preventFocusSteal }){
         onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('special')}>小説語彙</button>
       <button type="button" className={"dict-tab-btn"+(active==='media'?' active':'')}
         onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('media')}>メディア語</button>
+      <button type="button" className={"dict-tab-btn"+(active==='adult'?' active':'')}
+        onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('adult')}>成人向け表現</button>
+      <button type="button" className={"dict-tab-btn"+(active==='onomatopoeia'?' active':'')}
+        onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('onomatopoeia')}>オノマトペ</button>
+      <button type="button" className={"dict-tab-btn"+(active==='sceneFlow'?' active':'')}
+        onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('sceneFlow')}>進行表</button>
     </div>
   );
 }
@@ -5134,7 +5207,7 @@ function WritingSnippetDictionaryModal({ writingSnippets, setWritingSnippets, on
    表現辞典は候補を見比べて言葉を選ぶ「参考資料」のため、候補操作は挿入ではなく[コピー]中心にする。 */
 
 // ---- 参照パネル：検索が中心。候補語を眺めて、必要な語だけ[コピー]する（本文は書き換えない） ----
-function ExpressionDictionaryPanel({ dictionary, onOpenEditor, onClose, preventFocusSteal, style, dictTab, onDictTabChange }){
+function ExpressionDictionaryPanel({ dictionary, onOpenEditor, onClose, onInsert, preventFocusSteal, style, dictTab, onDictTabChange }){
   const [query, setQuery] = useState('');
   const [toast, setToast] = useState('');
   const toastTimerRef = useRef(null);
@@ -5223,9 +5296,14 @@ function ExpressionDictionaryPanel({ dictionary, onOpenEditor, onClose, preventF
                     {(x.tags||[]).map(t=>(<span className="expr-dict-tag" key={t}>{t}</span>))}
                   </div>
                   {x.note && <div className="expr-dict-expr-note">{x.note}</div>}
-                  <button type="button" className="btn btn-sm btn-primary expr-dict-insert-btn"
-                    onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
-                    onClick={()=>copyText(x.text)}>コピー</button>
+                  <div className="expr-dict-expr-actions">
+                    <button type="button" className="btn btn-sm btn-primary expr-dict-insert-btn"
+                      onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                      onClick={()=>copyText(x.text)}>コピー</button>
+                    {onInsert && <button type="button" className="btn btn-sm expr-dict-insert-btn"
+                      onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                      onClick={()=>onInsert(x.text)}>下書きへ挿入</button>}
+                  </div>
                 </div>
               ))}
             </div>
@@ -5239,7 +5317,7 @@ function ExpressionDictionaryPanel({ dictionary, onOpenEditor, onClose, preventF
 
 // ---- 小説語彙辞典（閲覧パネル）。表現辞典パネルと同じ下部ドロワー枠・タブ切替を共有する。
 //      本文への挿入は行わず、コピーのみ（copyPlainTextを表現辞典と共通利用）。 ----
-function SpecialDictionaryPanel({ dictionary, onOpenEditor, onClose, preventFocusSteal, style, dictTab, onDictTabChange }){
+function SpecialDictionaryPanel({ dictionary, onOpenEditor, onClose, onInsert, preventFocusSteal, style, dictTab, onDictTabChange }){
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [toast, setToast] = useState('');
@@ -5334,9 +5412,14 @@ function SpecialDictionaryPanel({ dictionary, onOpenEditor, onClose, preventFocu
               <div className="special-dict-rating-row"><span className="special-dict-rating-label">コミカル危険</span><RatingDots value={entry.comicRisk} /></div>
             </div>
             {entry.meaning && <div className="expr-dict-entry-notes">{entry.meaning}</div>}
-            <button type="button" className="btn btn-sm btn-primary expr-dict-insert-btn" style={{marginTop:6}}
-              onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
-              onClick={()=>copyHeadword(entry.headword)} disabled={!entry.headword}>コピー</button>
+            <div className="expr-dict-expr-actions">
+              <button type="button" className="btn btn-sm btn-primary expr-dict-insert-btn" style={{marginTop:6}}
+                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                onClick={()=>copyHeadword(entry.headword)} disabled={!entry.headword}>コピー</button>
+              {onInsert && <button type="button" className="btn btn-sm expr-dict-insert-btn" style={{marginTop:6}}
+                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                onClick={()=>onInsert(entry.headword)} disabled={!entry.headword}>下書きへ挿入</button>}
+            </div>
           </div>
         ))}
       </div>
@@ -5346,8 +5429,8 @@ function SpecialDictionaryPanel({ dictionary, onOpenEditor, onClose, preventFocu
 }
 
 // ---- 令和メディア語辞典（閲覧パネル）。表現辞典・小説語彙辞典パネルと同じ下部ドロワー枠・タブ切替を共有する。
-//      本文への挿入は行わず、コピーのみ（copyPlainTextを他辞典と共通利用）。データはmediaDictionaryとして完全分離。 ----
-function MediaDictionaryPanel({ dictionary, onOpenEditor, onClose, preventFocusSteal, style, dictTab, onDictTabChange }){
+//      データはmediaDictionaryとして完全分離。 ----
+function MediaDictionaryPanel({ dictionary, onOpenEditor, onClose, onInsert, preventFocusSteal, style, dictTab, onDictTabChange }){
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [toast, setToast] = useState('');
@@ -5436,9 +5519,14 @@ function MediaDictionaryPanel({ dictionary, onOpenEditor, onClose, preventFocusS
               <div className="special-dict-rating-row"><span className="special-dict-rating-label">コミカル危険</span><RatingDots value={entry.comicRisk} /></div>
             </div>
             {entry.meaning && <div className="expr-dict-entry-notes">{entry.meaning}</div>}
-            <button type="button" className="btn btn-sm btn-primary expr-dict-insert-btn" style={{marginTop:6}}
-              onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
-              onClick={()=>copyHeadword(entry.headword)} disabled={!entry.headword}>コピー</button>
+            <div className="expr-dict-expr-actions">
+              <button type="button" className="btn btn-sm btn-primary expr-dict-insert-btn" style={{marginTop:6}}
+                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                onClick={()=>copyHeadword(entry.headword)} disabled={!entry.headword}>コピー</button>
+              {onInsert && <button type="button" className="btn btn-sm expr-dict-insert-btn" style={{marginTop:6}}
+                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                onClick={()=>onInsert(entry.headword)} disabled={!entry.headword}>下書きへ挿入</button>}
+            </div>
           </div>
         ))}
       </div>
@@ -5447,7 +5535,262 @@ function MediaDictionaryPanel({ dictionary, onOpenEditor, onClose, preventFocusS
   );
 }
 
-// ---- 辞典編集モーダル：見出し語一覧（検索・カテゴリフィルタ）→ タップした1件の詳細 → 候補表現の詳細、の3階層 ----
+// ---- 成人向け表現辞典（閲覧パネル）。表現辞典パネルと同じ下部ドロワー枠・タブ切替を共有する。
+//      データはadultDictionaryとして完全分離。概念（concept）ごとに複数の候補表現（expressions）を持つ。 ----
+function AdultExpressionPanel({ dictionary, onOpenEditor, onClose, onInsert, preventFocusSteal, style, dictTab, onDictTabChange }){
+  const [query, setQuery] = useState('');
+  const [toast, setToast] = useState('');
+  const toastTimerRef = useRef(null);
+  const entries = dictionary.entries || [];
+  const q = query.trim().toLowerCase();
+
+  const matchEntry = (entry) => {
+    if(!q) return true;
+    if((entry.concept||'').toLowerCase().includes(q)) return true;
+    if((entry.category||'').toLowerCase().includes(q)) return true;
+    if((entry.aliases||[]).some(a=>(a||'').toLowerCase().includes(q))) return true;
+    if((entry.tags||[]).some(t=>(t||'').toLowerCase().includes(q))) return true;
+    if((entry.expressions||[]).some(x=>(x.text||'').toLowerCase().includes(q))) return true;
+    return false;
+  };
+  const filtered = entries.filter(matchEntry);
+
+  useEffect(()=>()=>{ if(toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
+  const showToast = (msg) => {
+    setToast(msg);
+    if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(()=>setToast(''), 1400);
+  };
+  const copyText = async (text) => {
+    if(!text) return;
+    const ok = await copyPlainText(text);
+    showToast(ok ? `「${text}」をコピーしました` : 'コピーに失敗しました');
+  };
+
+  return (
+    <div className="expr-dict-panel" style={style}>
+      <DictTabSwitch active={dictTab} onChange={onDictTabChange} preventFocusSteal={preventFocusSteal} />
+      <div className="expr-dict-head">
+        <input type="text" className="expr-dict-search" placeholder="検索（概念・別名・タグ・候補表現）"
+          value={query} onChange={e=>setQuery(e.target.value)}
+          onMouseDown={preventFocusSteal} onFocus={preventFocusSteal} />
+        <button type="button" className="btn btn-sm" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onOpenEditor}>
+          <span className="label-full">辞典を編集</span><span className="label-short">編集</span>
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onClose}>
+          <span className="label-full">閉じる</span><span className="label-short">×</span>
+        </button>
+      </div>
+      <div className="expr-dict-body">
+        {entries.length===0 && <div className="empty-hint">まだ成人向け表現が登録されていません。「辞典を編集」から追加できます。</div>}
+        {entries.length>0 && filtered.length===0 && <div className="empty-hint">「{query}」に一致する項目が見つかりません。</div>}
+        {filtered.map(entry=>(
+          <div className="expr-dict-entry" key={entry.id}>
+            <div className="expr-dict-entry-head">
+              {entry.category && <span className="expr-dict-entry-cat">{entry.category}</span>}
+              <span className="expr-dict-entry-headword">{entry.concept || '（無題）'}</span>
+              {(entry.aliases||[]).length>0 && <span className="expr-dict-entry-aliases">（{entry.aliases.join(' / ')}）</span>}
+            </div>
+            {(entry.tags||[]).length>0 && (
+              <div className="expr-dict-expr-main" style={{marginTop:4}}>
+                {entry.tags.map(t=>(<span className="expr-dict-tag" key={t}>{t}</span>))}
+              </div>
+            )}
+            <div className="expr-dict-expr-list">
+              {(entry.expressions||[]).length===0 && <div className="empty-hint" style={{padding:'4px 0'}}>候補表現がまだありません。</div>}
+              {(entry.expressions||[]).map(x=>(
+                <div className="expr-dict-expr-row" key={x.id}>
+                  <div className="expr-dict-expr-main">
+                    <span className="expr-dict-expr-text">{x.text}</span>
+                    <span className="expr-dict-tag">{x.perspective}</span>
+                  </div>
+                  <div className="special-dict-ratings">
+                    <div className="special-dict-rating-row"><span className="special-dict-rating-label">直接度</span><RatingDots value={x.directness} /></div>
+                    <div className="special-dict-rating-row"><span className="special-dict-rating-label">官能度</span><RatingDots value={x.eroticism} /></div>
+                    <div className="special-dict-rating-row"><span className="special-dict-rating-label">卑猥度</span><RatingDots value={x.vulgarity} /></div>
+                    <div className="special-dict-rating-row"><span className="special-dict-rating-label">文学度</span><RatingDots value={x.literary} /></div>
+                  </div>
+                  {x.note && <div className="expr-dict-expr-note">{x.note}</div>}
+                  <div className="expr-dict-expr-actions">
+                    <button type="button" className="btn btn-sm btn-primary expr-dict-insert-btn"
+                      onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                      onClick={()=>copyText(x.text)}>コピー</button>
+                    {onInsert && <button type="button" className="btn btn-sm expr-dict-insert-btn"
+                      onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                      onClick={()=>onInsert(x.text)}>下書きへ挿入</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {toast && <div className="expr-dict-toast">{toast}</div>}
+    </div>
+  );
+}
+
+// ---- オノマトペ辞書（閲覧パネル）。表現辞典パネルと同じ下部ドロワー枠・タブ切替を共有する。
+//      データはadultOnomatopoeiaとして完全分離。現象・カテゴリ・タグで絞り込む。 ----
+function OnomatopoeiaPanel({ dictionary, onOpenEditor, onClose, onInsert, preventFocusSteal, style, dictTab, onDictTabChange }){
+  const [query, setQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [toast, setToast] = useState('');
+  const toastTimerRef = useRef(null);
+  const entries = dictionary.entries || [];
+  const q = query.trim().toLowerCase();
+
+  const matchEntry = (entry) => {
+    if(categoryFilter && !(entry.categories||[]).includes(categoryFilter)) return false;
+    if(!q) return true;
+    if((entry.text||'').toLowerCase().includes(q)) return true;
+    if((entry.phenomenon||'').toLowerCase().includes(q)) return true;
+    if((entry.tags||[]).some(t=>(t||'').toLowerCase().includes(q))) return true;
+    if((entry.sources||[]).some(s=>(s||'').toLowerCase().includes(q))) return true;
+    if((entry.note||'').toLowerCase().includes(q)) return true;
+    return false;
+  };
+  const filtered = entries.filter(matchEntry);
+
+  useEffect(()=>()=>{ if(toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
+  const showToast = (msg) => {
+    setToast(msg);
+    if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(()=>setToast(''), 1400);
+  };
+  const copyText = async (text) => {
+    if(!text) return;
+    const ok = await copyPlainText(text);
+    showToast(ok ? `「${text}」をコピーしました` : 'コピーに失敗しました');
+  };
+
+  return (
+    <div className="expr-dict-panel" style={style}>
+      <DictTabSwitch active={dictTab} onChange={onDictTabChange} preventFocusSteal={preventFocusSteal} />
+      <div className="expr-dict-head">
+        <input type="text" className="expr-dict-search" placeholder="検索（語・現象・タグ・出典）"
+          value={query} onChange={e=>setQuery(e.target.value)}
+          onMouseDown={preventFocusSteal} onFocus={preventFocusSteal} />
+        <button type="button" className="btn btn-sm" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onOpenEditor}>
+          <span className="label-full">辞典を編集</span><span className="label-short">編集</span>
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onClose}>
+          <span className="label-full">閉じる</span><span className="label-short">×</span>
+        </button>
+      </div>
+      <div className="dict-cat-tabs" style={{padding:'8px 12px 0'}}>
+        <button type="button" className={"dict-cat-tab"+(categoryFilter===''?' active':'')}
+          onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>setCategoryFilter('')}>すべて</button>
+        {ONOMATOPOEIA_CATEGORIES.map(c=>(
+          <button key={c} type="button" className={"dict-cat-tab"+(categoryFilter===c?' active':'')}
+            onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>setCategoryFilter(c)}>{c}</button>
+        ))}
+      </div>
+      <div className="expr-dict-body">
+        {entries.length===0 && <div className="empty-hint">まだオノマトペが登録されていません。「辞典を編集」から追加できます。</div>}
+        {entries.length>0 && filtered.length===0 && <div className="empty-hint">「{query||categoryFilter}」に一致する語が見つかりません。</div>}
+        {filtered.map(entry=>(
+          <div className="expr-dict-entry" key={entry.id}>
+            <div className="expr-dict-entry-head">
+              <span className="expr-dict-entry-headword">{entry.text}</span>
+              {(entry.categories||[]).map(c=><span className="expr-dict-entry-cat" key={c}>{c}</span>)}
+            </div>
+            {entry.phenomenon && <div className="expr-dict-entry-notes">{entry.phenomenon}</div>}
+            {(entry.tags||[]).length>0 && (
+              <div className="expr-dict-expr-main" style={{marginTop:4}}>
+                {entry.tags.map(t=>(<span className="expr-dict-tag" key={t}>{t}</span>))}
+              </div>
+            )}
+            {entry.note && <div className="expr-dict-entry-notes">{entry.note}</div>}
+            <div className="expr-dict-expr-actions">
+              <button type="button" className="btn btn-sm btn-primary expr-dict-insert-btn" style={{marginTop:6}}
+                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                onClick={()=>copyText(entry.text)} disabled={!entry.text}>コピー</button>
+              {onInsert && <button type="button" className="btn btn-sm expr-dict-insert-btn" style={{marginTop:6}}
+                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                onClick={()=>onInsert(entry.text)} disabled={!entry.text}>下書きへ挿入</button>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {toast && <div className="expr-dict-toast">{toast}</div>}
+    </div>
+  );
+}
+
+// ---- 濡れ場の進行表（参照パネル）。下書き中に、保存済みの進行表（行為カードの並び）を開いて見るためだけの閲覧用。
+//      本文・下書きへの自動挿入は行わない（カードのコピーのみ）。管理（追加・並べ替え・削除）は「成人向け創作」の
+//      シーン進行タブで行う。データはadultSceneFlow.plansとして保持し、既存のitems/phases/selectedItemIdsとは独立。 ----
+function SceneFlowReferencePanel({ sceneFlow, onOpenEditor, onClose, preventFocusSteal, style, dictTab, onDictTabChange }){
+  const plans = sceneFlow.plans || [];
+  const [activeId, setActiveId] = useState(plans[0] ? plans[0].id : '');
+  const [toast, setToast] = useState('');
+  const toastTimerRef = useRef(null);
+  useEffect(()=>()=>{ if(toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
+  const showToast = (msg) => {
+    setToast(msg);
+    if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(()=>setToast(''), 1400);
+  };
+  const active = plans.find(p=>p.id===activeId) || plans[0] || null;
+  const copyText = async (text) => {
+    if(!text) return;
+    const ok = await copyPlainText(text);
+    showToast(ok ? 'コピーしました' : 'コピーに失敗しました');
+  };
+  const copyPlan = () => {
+    if(!active) return;
+    const lines = [`【${active.title}】`, active.beforeState && `行為前の状態：${active.beforeState}`,
+      ...active.cards.map((c,i)=>`${i+1}. ${c.name}${c.memo?`\n   ${c.memo}`:''}`),
+      active.afterState && `行為後の状態：${active.afterState}`].filter(Boolean).join('\n');
+    copyText(lines);
+  };
+  return (
+    <div className="expr-dict-panel" style={style}>
+      <DictTabSwitch active={dictTab} onChange={onDictTabChange} preventFocusSteal={preventFocusSteal} />
+      <div className="expr-dict-head">
+        <span className="expr-dict-entry-headword" style={{flex:'1 1 auto'}}>進行表を参照</span>
+        <button type="button" className="btn btn-sm" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onOpenEditor}>
+          <span className="label-full">進行表を管理</span><span className="label-short">管理</span>
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onClose}>
+          <span className="label-full">閉じる</span><span className="label-short">×</span>
+        </button>
+      </div>
+      {plans.length===0 ? (
+        <div className="empty-hint" style={{margin:'0 12px 12px'}}>まだ進行表がありません。「進行表を管理」から作成できます。</div>
+      ) : (
+        <>
+          <div className="dict-cat-tabs" style={{padding:'8px 12px 0'}}>
+            {plans.map(p=>(
+              <button key={p.id} type="button" className={"dict-cat-tab"+(active&&active.id===p.id?' active':'')}
+                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>setActiveId(p.id)}>{p.title||'無題の進行表'}</button>
+            ))}
+          </div>
+          <div className="expr-dict-body">
+            {active && <>
+              {active.beforeState && <div className="expr-dict-entry"><div className="expr-dict-entry-head"><span className="expr-dict-entry-cat">行為前の状態</span></div><div className="expr-dict-entry-notes">{active.beforeState}</div></div>}
+              {active.cards.length===0 && <div className="empty-hint">まだカードがありません。</div>}
+              {active.cards.map((c,i)=>(
+                <div className="expr-dict-entry" key={c.id}>
+                  <div className="expr-dict-entry-head"><span className="expr-dict-entry-cat">{i+1}</span><span className="expr-dict-entry-headword">{c.name||'（無題のカード）'}</span></div>
+                  {c.memo && <div className="expr-dict-entry-notes">{c.memo}</div>}
+                  <button type="button" className="btn btn-sm expr-dict-insert-btn" style={{marginTop:6}}
+                    onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                    onClick={()=>copyText(c.memo?`${c.name}\n${c.memo}`:c.name)}>カードをコピー</button>
+                </div>
+              ))}
+              {active.afterState && <div className="expr-dict-entry"><div className="expr-dict-entry-head"><span className="expr-dict-entry-cat">行為後の状態</span></div><div className="expr-dict-entry-notes">{active.afterState}</div></div>}
+              <button type="button" className="btn btn-sm btn-primary" style={{marginTop:4}}
+                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={copyPlan}>進行表全体をコピー</button>
+            </>}
+          </div>
+        </>
+      )}
+      {toast && <div className="expr-dict-toast">{toast}</div>}
+    </div>
+  );
+}
 function ExpressionDictionaryEditorModal({ expressionDictionary, setExpressionDictionary, onClose }){
   const entries = expressionDictionary.entries || [];
   const [view, setView] = useState('list'); // 'list' | 'entry' | 'expression'
@@ -6825,8 +7168,10 @@ function StoryPatternLibrary({data,setData}){
     {importOpen&&<Modal title="物語パターンJSON追加" onClose={()=>setImportOpen(false)} wide><p className="adult-tab-desc">name、category、scale、core、steps、strengths、pitfalls、examples、tags を使えます。同名はスキップします。</p><textarea rows="14" style={{width:'100%',fontFamily:'ui-monospace,monospace'}} value={importText} onChange={e=>setImportText(e.target.value)} placeholder={'{"patterns":[{"name":"新しい型","category":"冒険","scale":"長編","core":"構造の要約","steps":["開始","転換","決着"],"strengths":[],"pitfalls":[],"examples":[],"tags":[]}]}'}/>{check.error&&<div className="empty-hint" style={{color:'var(--danger)'}}>{check.error}</div>}<div className="modal-actions"><button className="btn" onClick={()=>setImportOpen(false)}>キャンセル</button><button className="btn btn-primary" disabled={!!check.error||!check.valid.length} onClick={runImport}>{check.valid.length}件を追加</button></div></Modal>}{toast&&<div className="expr-dict-toast" style={{position:'fixed',bottom:'76px'}}>{toast}</div>}</div>;
 }
 
-function AdultToolsScreen({ adultDictionary, setAdultDictionary, adultPhraseRemix, setAdultPhraseRemix, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow, setAdultSceneFlow }){
+function AdultToolsScreen({ adultDictionary, setAdultDictionary, adultPhraseRemix, setAdultPhraseRemix, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow, setAdultSceneFlow, openTabRequest }){
   const [tab, setTab] = useState('dict'); // 'dict' | 'tone' | 'phraseRemix' | 'onomatopoeia' | 'sceneFlow' | 'map'
+  // 「下書き」の辞典ドロワーから「編集」「進行表を管理」で遷移してきたとき、該当タブを直接開く。
+  useEffect(()=>{ if(openTabRequest && openTabRequest.tab) setTab(openTabRequest.tab); }, [openTabRequest && openTabRequest.nonce]);
   return (
     <div className="adult-tools-screen">
       <div className="toolbar">
@@ -7360,6 +7705,147 @@ function AdultRemixTab({ adultDictionary }){
 
 // ---- シーン進行：段階別の材料を見ながら「今回の流れ」を組む。 ----
 function AdultSceneFlowTab({data,setData}){
+  // 採用仕様：シーン進行は「開始→最中→終了」を埋めるフォームではなく、行為カードを自由に追加・並べ替え・
+  // 繰り返し・削除できる道具（進行表＝plans）にする。既存の段階別材料ライブラリ（phases/items/selectedItemIds）
+  // はデータ・機能とも削除せず、「参考材料ライブラリ」として引き続き開ける。
+  const [view,setView]=useState('plans'); // 'plans'（採用：進行表カード） | 'library'（既存：段階別材料ライブラリ）
+  return <div>
+    <div className="story-tools-tabs">
+      <button type="button" className={'story-tools-tab'+(view==='plans'?' active':'')} onClick={()=>setView('plans')}>進行表（カード）</button>
+      <button type="button" className={'story-tools-tab'+(view==='library'?' active':'')} onClick={()=>setView('library')}>参考材料ライブラリ</button>
+    </div>
+    {view==='plans' ? <SceneFlowPlansEditor data={data} setData={setData}/> : <SceneFlowLibraryView data={data} setData={setData}/>}
+  </div>;
+}
+
+// ---- 進行表（採用仕様）：行為カードを自由に追加・並べ替え・繰り返し・削除できる道具。
+//      開始・終了の位置は固定しない。カードは名称＋短いメモのみ。心情等はカードごとに必須にしない。
+//      シーン全体には任意入力の「行為前の状態」「行為後の状態」だけを置ける。複数保存し、下書きから参照できる。 ----
+function SceneFlowPlansEditor({data,setData}){
+  const plans=data.plans||[];
+  const active=plans.find(p=>p.id===data.activePlanId)||plans[0]||null;
+  const [cardDraft,setCardDraft]=useState(null); // {cardId, name, memo}
+  const [toast,setToast]=useState(''); const toastTimerRef=useRef(null);
+  useEffect(()=>()=>{if(toastTimerRef.current)clearTimeout(toastTimerRef.current);},[]);
+  const showToast=msg=>{setToast(msg);if(toastTimerRef.current)clearTimeout(toastTimerRef.current);toastTimerRef.current=setTimeout(()=>setToast(''),1400);};
+
+  const setActivePlanId=id=>setData(d=>({...d,activePlanId:id}));
+  const addPlan=()=>{
+    const p=makeFlowPlan(`進行表${plans.length+1}`);
+    setData(d=>({...d,plans:[...(d.plans||[]),p],activePlanId:p.id}));
+  };
+  const patchActivePlan=patch=>setData(d=>({...d,plans:d.plans.map(p=>p.id===(active&&active.id)?{...p,...patch}:p)}));
+  const deletePlan=()=>{
+    if(!active||!confirm(`「${active.title||'この進行表'}」を削除しますか？`))return;
+    setData(d=>{
+      const rest=d.plans.filter(p=>p.id!==active.id);
+      return {...d,plans:rest,activePlanId:rest[0]?rest[0].id:null};
+    });
+  };
+  const duplicatePlan=()=>{
+    if(!active)return;
+    const copy={...active,id:uid('flowplan'),title:active.title+'（複製）',cards:active.cards.map(c=>({...c,id:uid('flowcard')}))};
+    setData(d=>({...d,plans:[...d.plans,copy],activePlanId:copy.id}));
+  };
+
+  // カードは追加した時点でそのまま一覧に並ぶ（＝繰り返し追加が自由）。名前・メモはタップして後から入力できる。
+  const addCard=()=>{ if(!active)return; patchActivePlan({cards:[...active.cards,makeFlowCard('','')]}); };
+  const openCard=c=>setCardDraft({cardId:c.id,name:c.name,memo:c.memo});
+  const saveCard=()=>{
+    if(!cardDraft||!active)return;
+    patchActivePlan({cards:active.cards.map(c=>c.id===cardDraft.cardId?{...c,name:cardDraft.name,memo:cardDraft.memo}:c)});
+    setCardDraft(null);
+  };
+  const deleteCard=cardId=>{
+    if(!active||!confirm('このカードを削除しますか？'))return;
+    patchActivePlan({cards:active.cards.filter(c=>c.id!==cardId)});
+    if(cardDraft&&cardDraft.cardId===cardId)setCardDraft(null);
+  };
+  // 「繰り返し」＝同じカードをもう1枚、直後に複製する
+  const duplicateCard=i=>{
+    if(!active)return;
+    const c=active.cards[i];
+    const copy={...c,id:uid('flowcard')};
+    const next=[...active.cards];next.splice(i+1,0,copy);
+    patchActivePlan({cards:next});
+  };
+  const moveCard=(i,delta)=>{
+    if(!active)return;
+    const next=[...active.cards],to=i+delta;
+    if(to<0||to>=next.length)return;
+    [next[i],next[to]]=[next[to],next[i]];
+    patchActivePlan({cards:next});
+  };
+  const copyPlan=async()=>{
+    if(!active)return;
+    const lines=[`【${active.title}】`,active.beforeState&&`行為前の状態：${active.beforeState}`,
+      ...active.cards.map((c,i)=>`${i+1}. ${c.name||'（無題のカード）'}${c.memo?`\n   ${c.memo}`:''}`),
+      active.afterState&&`行為後の状態：${active.afterState}`].filter(Boolean).join('\n');
+    const ok=await copyPlainText(lines);
+    showToast(ok?'進行表をコピーしました':'コピーに失敗しました');
+  };
+
+  return <div>
+    <p className="adult-tab-desc">「開始→最中→終了」の決まった順番はありません。行為カードを自由に追加し、好きな順に並べ替え・繰り返し・削除できます。開始・終了を必須にはしません。進行表は複数保存でき、下書き中は辞典ドロワーの「進行表」タブから参照できます。</p>
+    <div className="scene-workspace">
+      <aside className="scene-list-panel">
+        <div className="dict-list-head"><span>進行表</span><button type="button" className="btn btn-sm btn-primary" onClick={addPlan}>＋</button></div>
+        <div className="scene-list">
+          {plans.map(p=>(
+            <button key={p.id} type="button" className={'scene-list-item'+(active&&active.id===p.id?' active':'')} onClick={()=>setActivePlanId(p.id)}>
+              <div className="scene-list-title">{p.title||'無題の進行表'}</div>
+              <div className="scene-list-sub">{p.cards.length}枚</div>
+            </button>
+          ))}
+          {!plans.length && <div className="empty-hint">「＋」から作成できます。</div>}
+        </div>
+      </aside>
+      <section className="scene-editor-panel">
+        {!active ? <div className="empty-hint">左の「＋」から進行表を作成してください。</div> : <>
+          <div className="dict-field-block span-all"><label className="dict-field-label">進行表の名前</label><input value={active.title} onChange={e=>patchActivePlan({title:e.target.value})}/></div>
+          <div className="scene-meta-grid">
+            <div className="dict-field-block"><label className="dict-field-label">行為前の状態（任意）</label><textarea rows="2" value={active.beforeState} onChange={e=>patchActivePlan({beforeState:e.target.value})} placeholder="必要な場合だけ書く"/></div>
+            <div className="dict-field-block"><label className="dict-field-label">行為後の状態（任意）</label><textarea rows="2" value={active.afterState} onChange={e=>patchActivePlan({afterState:e.target.value})} placeholder="必要な場合だけ書く"/></div>
+          </div>
+          <div className="dict-list-head" style={{marginTop:14}}><span>カード</span><span className="dict-list-count">{active.cards.length}枚</span></div>
+          <button type="button" className="writing-block-insert" onClick={addCard}>＋ カードを追加</button>
+          <div className="scene-flow-plan-list" style={{marginTop:8}}>
+            {active.cards.map((c,i)=>(
+              <div className="scene-flow-plan-row" key={c.id}>
+                <span className="scene-flow-plan-num">{i+1}</span>
+                <button type="button" className="scene-flow-plan-main writing-block-select" onClick={()=>openCard(c)}>
+                  <strong>{c.name||'（無題のカード）'}</strong>
+                  {c.memo && <span>{c.memo}</span>}
+                </button>
+                <div className="scene-flow-plan-buttons">
+                  <button type="button" onClick={()=>moveCard(i,-1)} disabled={i===0} aria-label="上へ移動">↑</button>
+                  <button type="button" onClick={()=>moveCard(i,1)} disabled={i===active.cards.length-1} aria-label="下へ移動">↓</button>
+                  <button type="button" onClick={()=>duplicateCard(i)} aria-label="このカードを繰り返す">繰り返す</button>
+                  <button type="button" onClick={()=>deleteCard(c.id)} aria-label="カードを削除">×</button>
+                </div>
+              </div>
+            ))}
+            {!active.cards.length && <div className="empty-hint">まだカードがありません。「＋ カードを追加」から始めます。</div>}
+          </div>
+          <div className="modal-actions" style={{justifyContent:'space-between',paddingBottom:0,marginTop:10}}>
+            <div><button type="button" className="btn btn-danger" onClick={deletePlan}>進行表を削除</button></div>
+            <div><button type="button" className="btn" onClick={duplicatePlan}>複製</button> <button type="button" className="btn btn-primary" onClick={copyPlan}>コピー</button></div>
+          </div>
+        </>}
+      </section>
+    </div>
+    {cardDraft && <Modal title="カード" onClose={()=>setCardDraft(null)}>
+      <div className="dict-field-block"><label className="dict-field-label">行為名</label><input value={cardDraft.name} onChange={e=>setCardDraft(d=>({...d,name:e.target.value}))} placeholder="例：手をつなぐ" autoFocus/></div>
+      <div className="dict-field-block"><label className="dict-field-label">短い描写メモ（任意）</label><textarea rows="4" value={cardDraft.memo} onChange={e=>setCardDraft(d=>({...d,memo:e.target.value}))}/></div>
+      <div className="modal-actions"><button type="button" className="btn" onClick={()=>setCardDraft(null)}>キャンセル</button><button type="button" className="btn btn-primary" onClick={saveCard}>保存</button></div>
+    </Modal>}
+    {toast && <div className="expr-dict-toast" style={{position:'fixed',bottom:'76px'}}>{toast}</div>}
+  </div>;
+}
+
+// ---- 参考材料ライブラリ（既存機能）：段階別に材料を検索・登録し、「今回の流れ」へ選んで並べる。
+//      データ（phases/items/selectedItemIds）・機能とも変更なし。UI上のラベルのみ「進行表」から独立させた。 ----
+function SceneFlowLibraryView({data,setData}){
   const phases=data.phases||[]; const items=data.items||[];
   const [phaseId,setPhaseId]=useState(phases[0]?phases[0].id:'');
   const [kind,setKind]=useState(''); const [query,setQuery]=useState('');
@@ -7406,7 +7892,7 @@ function AdultSceneFlowTab({data,setData}){
   },[importText,items,phases]);
   const runImport=()=>{if(importCheck.error||!importCheck.valid.length)return;setData(d=>({...d,items:[...d.items,...importCheck.valid]}));const n=importCheck.valid.length;setImportOpen(false);setImportText('');showToast(`${n}件を追加しました`);};
   return <div>
-    <p className="adult-tab-desc">場面を順番に見ながら、動作だけでなく反応・心理・関係性などの材料を選びます。順番は目安なので、段階を戻ったり飛ばしたりしてかまいません。</p>
+    <p className="adult-tab-desc">場面を順番に見ながら、動作だけでなく反応・心情・関係性などの材料を選びます。順番は目安なので、段階を戻ったり飛ばしたりしてかまいません（既存機能。データはそのまま維持されています）。</p>
     <div className="scene-flow-phases">{phases.map((p,i)=><button type="button" key={p.id} className={'scene-flow-phase'+(activePhase&&activePhase.id===p.id?' active':'')} onClick={()=>setPhaseId(p.id)}><span className="scene-flow-phase-num">{i+1}</span>{p.name}</button>)}</div>
     <div className="scene-flow-layout">
       <div>
@@ -7434,7 +7920,6 @@ function AdultSceneFlowTab({data,setData}){
     {toast&&<div className="expr-dict-toast" style={{position:'fixed',bottom:'76px'}}>{toast}</div>}
   </div>;
 }
-
 // ---- オノマトペ辞書：対象×現象×性質から、音・様態・発声の候補を探す。 ----
 function AdultOnomatopoeiaTab({ data, setData }){
   const entries=data.entries||[];
@@ -8052,6 +8537,8 @@ function App(){
   const [writingTab, setWritingTab] = useState('chapters'); // Writing画面のタブ：'draft'|'shelf'|'map'|'chapters'（＝本文）
   const [sceneToolsSignal, setSceneToolsSignal] = useState(0); // 「シーンの地図」→「１話の構成を開く」の合図
   const openSceneTools = () => { setScreen('storyTools'); setDetailId(null); setQuery(''); setSceneToolsSignal(s=>s+1); };
+  const [adultToolsOpenRequest, setAdultToolsOpenRequest] = useState({tab:null, nonce:0}); // 下書きの辞典ドロワー→「成人向け創作」の該当タブへ
+  const openAdultTools = (tab) => { setScreen('adultTools'); setDetailId(null); setQuery(''); setAdultToolsOpenRequest({tab, nonce: Date.now()}); };
   const [syncOpen,setSyncOpen]=useState(false);
   const [syncConfig,setSyncConfig]=useState(loadCloudSyncConfig);
   const [syncState,setSyncState]=useState({phase:'idle',message:'同期キーを設定すると端末間で共有できます。'});
@@ -8358,11 +8845,11 @@ function App(){
   } else if(screen==='storyTools'){
     body = <StoryToolsScreen data={data} setData={setData} outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} openSceneSignal={sceneToolsSignal} />;
   } else if(screen==='writing'){
-    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} />;
+    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} adultDictionary={adultDictionary} adultOnomatopoeia={adultOnomatopoeia} adultSceneFlow={adultSceneFlow} onOpenAdultTools={openAdultTools} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} />;
   } else if(screen==='aiimport'){
     body = <AiImportScreen data={data} setData={setData} lastImportBackup={lastImportBackup} setLastImportBackup={setLastImportBackup} />;
   } else if(screen==='adultTools'){
-    body = <AdultToolsScreen adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultPhraseRemix={adultPhraseRemix} setAdultPhraseRemix={setAdultPhraseRemix} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} setAdultSceneFlow={setAdultSceneFlow} />;
+    body = <AdultToolsScreen adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultPhraseRemix={adultPhraseRemix} setAdultPhraseRemix={setAdultPhraseRemix} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} setAdultSceneFlow={setAdultSceneFlow} openTabRequest={adultToolsOpenRequest} />;
   }
 
   useEffect(()=>{ setDetailId(null); setWritingFocusMode(false); setMoreMenuOpen(false); }, [screen]);
