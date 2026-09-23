@@ -776,6 +776,7 @@ const NAV_ITEMS = [
   { key:'ideas', label:'ネタ箱', icon:'💡' },
   { key:'plot', label:'プロット', icon:'🧩' },
   { key:'storyTools', label:'シーン・物語設計', icon:'🎬' },
+  { key:'sceneFlow', label:'シーン進行', icon:'🧵' },
   { key:'writing', label:'本文', icon:'✍️' },
   { key:'aiimport', label:'設定を一括取り込み', icon:'🤖' },
   { key:'adultTools', label:'成人向け創作', icon:'🔞' },
@@ -792,8 +793,8 @@ const MOBILE_TAB_ITEMS = [
   { key:'more', label:'総合', icon:'☰' },
 ];
 // 「総合」ボトムシートに表示する画面（NAV_ITEMSのラベル/アイコンをそのまま流用）
-// 人物・組織・場所・世界設定・年表・ネタ箱・従来のプロット・従来の構成／物語パターン集（storyTools内）・一括取り込み・成人向け創作
-const MORE_SCREEN_KEYS = ['characters','organizations','locations','worldsettings','timeline','ideas','plot','storyTools','aiimport','adultTools'];
+// 人物・組織・場所・世界設定・年表・ネタ箱・従来のプロット・従来の構成／物語パターン集（storyTools内）・シーン進行・一括取り込み・成人向け創作
+const MORE_SCREEN_KEYS = ['characters','organizations','locations','worldsettings','timeline','ideas','plot','storyTools','sceneFlow','aiimport','adultTools'];
 const isMoreScreen = (screen) => MORE_SCREEN_KEYS.includes(screen);
 
 const DEFAULT_WS_CATEGORIES = [
@@ -1606,10 +1607,6 @@ function defaultAdultSceneFlow(){
     makeSceneFlowItem('after','関係性','始まる前と何が変わったか示す','距離、信頼、気まずさ、独占欲など',['変化','関係性']),
   ],selectedItemIds:[],plans:[],activePlanId:null};
 }
-// 進行表内の1枚のカード：名称（行為名）とメモ（短い描写）のみ。心情等の固定項目は持たない。
-function makeFlowCard(name,memo){ return {id:uid('flowcard'),name:name||'',memo:memo||''}; }
-// 進行表：カードの自由な並び。開始・終了を区別しない。行為前後の状態は任意入力。
-function makeFlowPlan(title){ return {id:uid('flowplan'),title:title||'新しい進行表',beforeState:'',afterState:'',cards:[]}; }
 function normalizeAdultSceneFlow(raw){
   const fallback=defaultAdultSceneFlow();
   const phases=Array.isArray(raw&&raw.phases)&&raw.phases.length?raw.phases.map((x,i)=>({id:x.id||uid('flowphase'),name:x.name||`段階${i+1}`})):fallback.phases;
@@ -1810,8 +1807,42 @@ function initialData(){
     draftingTextLegacyBackup: '', // 旧・単一下書き(draftingText)の安全な退避用。UIでは使用しない。
     savedPassages: [],
     sceneMaps: [],
+    sceneFlowPlans: [], // 共通シーン進行（全年齢・成人向け共通の構造）。kind:'general'|'adult'で区別する。
+    sceneFlowPlansMigratedFromAdult: false, // 旧・成人向けシーン進行(adultSceneFlow.plans)からの一回限りの取り込み済みフラグ
     entityRelations: [],
   };
+}
+
+// シーン進行の1枚のカード：短い見出し(name)＋自由記述メモ(memo)のみ。心情等は必須にしない。
+function makeFlowCard(name,memo){ return {id:uid('flowcard'),name:name||'',memo:memo||''}; }
+function normalizeFlowCard(c){ c=c||{}; return {id:c.id||uid('flowcard'), name:String(c.name||''), memo:String(c.memo||'')}; }
+// シーン進行：カードの自由な並び。開始・終了の位置は固定しない。行為前後の状態は任意入力。
+// kind: 'general'（全年齢・共通）| 'adult'（成人向け）。データ構造・操作方法は両者で完全に同じ。
+function makeFlowPlan(title, kind){ return {id:uid('flowplan'),title:title||'新しいシーン進行',kind:kind==='adult'?'adult':'general',beforeState:'',afterState:'',cards:[]}; }
+function normalizeFlowPlan(p){
+  p = p || {};
+  return {
+    id: p.id || uid('flowplan'),
+    title: String(p.title||'無題のシーン進行'),
+    kind: p.kind==='adult' ? 'adult' : 'general',
+    beforeState: String(p.beforeState||''),
+    afterState: String(p.afterState||''),
+    cards: Array.isArray(p.cards) ? p.cards.map(normalizeFlowCard) : [],
+  };
+}
+// シーン進行を「下書きへ挿入」する際の、普通のテキストへの変換。空欄の項目は省略する。
+function formatSceneFlowPlanForInsert(plan){
+  const parts = [];
+  parts.push(`【シーン進行：${plan.title||'無題のシーン進行'}】`);
+  if((plan.beforeState||'').trim()) parts.push(`開始前：${plan.beforeState.trim()}`);
+  const cardLines = (plan.cards||[]).map((c,i)=>{
+    const head = `・${c.name || `カード${i+1}`}`;
+    return (c.memo||'').trim() ? `${head}\n　メモ：${c.memo.trim()}` : head;
+  });
+  if(cardLines.length) parts.push(cardLines.join('\n\n'));
+  if((plan.afterState||'').trim()) parts.push(`終了後：${plan.afterState.trim()}`);
+  parts.push('【シーン進行ここまで】');
+  return parts.join('\n\n');
 }
 
 // 下書き（複数保存）1件の初期値。sourceType/sourceIdは「塊」または「本文ブロック」からのコピー元を
@@ -1872,6 +1903,10 @@ function migrateData(parsed){
 
   parsed.savedPassages=Array.isArray(parsed.savedPassages)?parsed.savedPassages.map(p=>({...p,id:p.id||uid('passage'),title:String(p.title||'無題の塊'),body:String(p.body||''),memo:String(p.memo||''),version:String(p.version||'ver1')})):[];
   parsed.sceneMaps=Array.isArray(parsed.sceneMaps)?parsed.sceneMaps.map(m=>({...m,id:m.id||uid('map'),title:String(m.title||'新しい話'),items:Array.isArray(m.items)?m.items.map(i=>({...i,id:i.id||uid('mapitem'),title:String(i.title||''),memo:String(i.memo||'')})):[]})):[];
+  // 共通シーン進行（全年齢・成人向け共通の構造）。旧・成人向けシーン進行（adultSceneFlow.plans、別ストア）からの
+  // 一回限りの取り込みはApp側で行う（両方のストアが揃うのを待つ必要があるため）。ここではこのデータ自身の正規化のみ。
+  parsed.sceneFlowPlans = Array.isArray(parsed.sceneFlowPlans) ? parsed.sceneFlowPlans.map(normalizeFlowPlan) : [];
+  parsed.sceneFlowPlansMigratedFromAdult = !!parsed.sceneFlowPlansMigratedFromAdult;
   if(!parsed.worldSettings) parsed.worldSettings = initialData().worldSettings;
   if(!parsed.plot) parsed.plot = { structureType:'自由構成', chapters: [] };
   if(!parsed.writings) parsed.writings = [];
@@ -4262,7 +4297,7 @@ function Plot({ data, setData, allChars, allLocations }){
 }
 
 /* ============ 本文 ============ */
-function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, adultDictionary, adultOnomatopoeia, adultSceneFlow, onOpenAdultTools, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId }){
+function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, adultDictionary, adultOnomatopoeia, adultSceneFlow, onOpenAdultTools, onOpenSceneFlowScreen, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId }){
   const [openId, setOpenId] = useState(null);
   // 検索結果などから特定の章を直接開きたいとき（openChapterIdが変化するたび）に本文タブへ切り替えて開く。
   useEffect(()=>{
@@ -4307,6 +4342,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const memoSectionRef = useRef(null);
   const textareaRef = useRef(null);
   const savedSelectionRef = useRef({ start:0, end:0 });
+  const hasCursorInfoRef = useRef(false); // 一度でも実際のカーソル位置を取得できたか（下書きを切り替えたらリセットする）
   const savedScrollRef = useRef({ textareaScrollTop:0, windowScrollY:0, focusWrapScrollTop:0 });
   const focusBodyWrapRef = useRef(null);
   const quickbarWrapRef = useRef(null);
@@ -4394,15 +4430,17 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     if(!activeDraft)return;
     setData(d=>({...d,drafts:(d.drafts||[]).map(x=>x.id===activeDraft.id?{...x,title,updatedAt:new Date().toISOString()}:x)}));
   };
-  const openDraft=(id)=>{ setPaletteOpen(false);setExprDictOpen(false); setData(d=>({...d,activeDraftId:id})); };
-  const backToDraftList=()=>{ setPaletteOpen(false);setExprDictOpen(false);setDraftHistoryOpen(false); setData(d=>({...d,activeDraftId:null})); };
+  const openDraft=(id)=>{ setPaletteOpen(false);setExprDictOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:id})); };
+  const backToDraftList=()=>{ setPaletteOpen(false);setExprDictOpen(false);setDraftHistoryOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:null})); };
   const addBlankDraft=()=>{
     const entry=makeDraftEntry('無題の下書き','',null,null);
+    hasCursorInfoRef.current=false;
     setData(d=>({...d,drafts:[...(d.drafts||[]),entry],activeDraftId:entry.id}));
   };
   // 「塊を下書きへ」「本文を下書きへ」共通：必ず新しい下書きを作る。既存の下書きには一切触れない。
   const createDraftFromSource=(sourceType,sourceId,title,body)=>{
     const entry=makeDraftEntry(title||'無題の下書き',body||'',sourceType,sourceId);
+    hasCursorInfoRef.current=false;
     setData(d=>({...d,drafts:[...(d.drafts||[]),entry],activeDraftId:entry.id}));
     setWorkspaceTab('draft');
     showDraftToast(`新しい下書き「${entry.title}」を作成しました（既存の下書きはそのままです）`);
@@ -4522,6 +4560,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     const el = textareaRef.current;
     if(el && typeof el.selectionStart === 'number'){
       savedSelectionRef.current = { start: el.selectionStart, end: el.selectionEnd };
+      hasCursorInfoRef.current = true; // 一度でも実際のカーソル位置を取得できたことを記録する
     }
     if(el){
       savedScrollRef.current.textareaScrollTop = el.scrollTop;
@@ -4541,6 +4580,9 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   };
 
   const getSelection = (bodyLen) => {
+    // カーソル位置を一度も取得できていない場合（テキストエリアに触れる前など）は、
+    // 仕様どおり本文の末尾へ追記する（位置0ではなく末尾がフォールバック）。
+    if(!hasCursorInfoRef.current) return { start: bodyLen, end: bodyLen };
     // DOM上の現在値ではなく、savedSelectionRef（最後に下書き上で確定していたカーソル位置）を基準にする
     let { start, end } = savedSelectionRef.current;
     start = Math.max(0, Math.min(start ?? bodyLen, bodyLen));
@@ -4613,7 +4655,20 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   // 各タブへ遷移して編集する（既存の登録・編集機能をそのまま使う）。遷移時はこのドロワーを閉じる。
   const goToAdultDict = () => { setExprDictOpen(false); onOpenAdultTools&&onOpenAdultTools('dict'); };
   const goToOnomatopoeia = () => { setExprDictOpen(false); onOpenAdultTools&&onOpenAdultTools('onomatopoeia'); };
-  const goToSceneFlow = () => { setExprDictOpen(false); onOpenAdultTools&&onOpenAdultTools('sceneFlow'); };
+  const goToSceneFlow = () => { setExprDictOpen(false); onOpenSceneFlowScreen&&onOpenSceneFlowScreen(); };
+  // シーン進行を下書きへ挿入する直前に、必ず現在の内容を履歴へ退避してから、カーソル位置（不明なら末尾）へ挿入する。
+  // 挿入位置の前後に既に改行が無ければ、地続きにならないよう改行を補う（本文の内容そのものは変えない）。
+  const insertSceneFlowText = (text) => {
+    if(!activeDraft) return;
+    pushDraftHistory(activeDraft.id, activeDraft.body);
+    const body = draftBody;
+    const { start } = getSelection(body.length);
+    const before = body.slice(0, start);
+    const after = body.slice(start);
+    const lead = before.length===0 ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+    const trail = after.length===0 ? '' : after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n';
+    insertIntoBody(lead + text + trail);
+  };
 
   const paletteBlock = paletteOpen ? (
     <SnippetPalette
@@ -4679,9 +4734,10 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
       />
     ) : dictTab==='sceneFlow' ? (
       <SceneFlowReferencePanel
-        sceneFlow={adultSceneFlow||{plans:[]}}
+        plans={(data.sceneFlowPlans||[])}
         onOpenEditor={goToSceneFlow}
         onClose={closeExprDict}
+        onInsert={insertSceneFlowText}
         preventFocusSteal={preventFocusSteal}
         style={{ bottom: paletteBottomOffset + 'px' }}
         dictTab={dictTab}
@@ -4872,6 +4928,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         <p className="adult-tab-desc">下書きは何件でも保存できます。塊や本文を下書きへ送ると、必ず新しい下書きが作られます（既存の下書きは上書きされません）。</p>
         <div className="toolbar">
           <button className="btn btn-primary" onClick={addBlankDraft}>＋ 新しい下書き</button>
+          <button className="btn btn-sm" onClick={goToSceneFlow}>シーン進行</button>
           <span className="filler" />
           <button className="btn btn-sm" onClick={()=>setDraftShowTrash(x=>!x)}>{draftShowTrash?'一覧へ戻る':`ゴミ箱（${trashedDrafts.length}）`}</button>
         </div>
@@ -4922,6 +4979,12 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
           <button type="button" className={"btn btn-sm"+(exprDictOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleExprDict}>
             <span className="wh-label-full">表現辞典</span><span className="wh-label-short">辞典</span>
           </button>
+          <button type="button" className="btn btn-sm" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>{ setPaletteOpen(false); setDictTab('sceneFlow'); setExprDictOpen(true); }}>
+            <span className="wh-label-full">シーン進行</span><span className="wh-label-short">進行</span>
+          </button>
+          <button type="button" className="btn btn-sm" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>{ setPaletteOpen(false); setDictTab('adult'); setExprDictOpen(true); }}>
+            <span className="wh-label-full">成人向け候補</span><span className="wh-label-short">成人</span>
+          </button>
           <button type="button" className="btn btn-sm" onClick={()=>setDraftHistoryOpen(true)}>履歴</button>
           <span className="writing-only-desktop"><FontSizeControl value={writingFontSize} onChange={setWritingFontSize} /></span>
           <button type="button" className="btn btn-sm writing-more-btn writing-only-mobile" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleWritingMore} aria-label="その他の操作" title="その他の操作">⋯</button>
@@ -4940,7 +5003,10 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
       </div>}
       {workspaceTab==='map'&&<div className="writing-block-board">
         <p className="adult-tab-desc">話の道筋を置く地図です。本文の順番とは独立しています。「１話の構成」から場面ごとの工程を詳しく設計できます。</p>
-        <button className="btn btn-primary" onClick={()=>setData(d=>({...d,sceneMaps:[...(d.sceneMaps||[]),{id:uid('map'),title:'新しい話',items:[]}]}))}>＋ 地図を追加</button>
+        <div className="toolbar">
+          <button className="btn btn-primary" onClick={()=>setData(d=>({...d,sceneMaps:[...(d.sceneMaps||[]),{id:uid('map'),title:'新しい話',items:[]}]}))}>＋ 地図を追加</button>
+          <button className="btn btn-sm" onClick={goToSceneFlow}>シーン進行を管理</button>
+        </div>
         {(data.sceneMaps||[]).map(m=><section key={m.id}><div className="toolbar"><input value={m.title} aria-label="地図のタイトル" onChange={e=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id===m.id?{...x,title:e.target.value}:x)}))}/><button className="btn btn-sm" onClick={()=>onOpenSceneTools&&onOpenSceneTools()}>１話の構成を開く</button><button className="btn btn-sm" onClick={()=>{if(confirm('この地図を削除しますか？'))setData(d=>({...d,sceneMaps:d.sceneMaps.filter(x=>x.id!==m.id)}))}}>地図を削除</button></div>
           {m.items.map((item,i)=><div className="writing-block-card" key={item.id}><button className="writing-block-select" onClick={()=>setMapDraft({mapId:m.id,item:{...item}})}><strong>{item.title||'未定の場面'}</strong><span>{item.memo}</span></button><div className="writing-block-actions"><button className="btn btn-sm" disabled={!i} onClick={()=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:x.items.map((y,j)=>j===i-1?x.items[i]:j===i?x.items[i-1]:y)})}))}>↑</button><button className="btn btn-sm" disabled={i===m.items.length-1} onClick={()=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:x.items.map((y,j)=>j===i+1?x.items[i]:j===i?x.items[i+1]:y)})}))}>↓</button><button className="btn btn-sm" onClick={()=>{if(confirm('この項目を削除しますか？'))setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:x.items.filter(y=>y.id!==item.id)})}))}}>×</button></div></div>)}
           <button className="writing-block-insert" onClick={()=>setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==m.id?x:{...x,items:[...x.items,{id:uid('mapitem'),title:'新しい出来事',memo:''}]})}))}>＋ 出来事を追加</button></section>)}
@@ -5152,7 +5218,7 @@ function DictTabSwitch({ active, onChange, preventFocusSteal }){
       <button type="button" className={"dict-tab-btn"+(active==='onomatopoeia'?' active':'')}
         onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('onomatopoeia')}>オノマトペ</button>
       <button type="button" className={"dict-tab-btn"+(active==='sceneFlow'?' active':'')}
-        onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('sceneFlow')}>進行表</button>
+        onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('sceneFlow')}>シーン進行</button>
     </div>
   );
 }
@@ -5934,8 +6000,8 @@ function OnomatopoeiaPanel({ dictionary, onOpenEditor, onClose, onInsert, preven
 // ---- 濡れ場の進行表（参照パネル）。下書き中に、保存済みの進行表（行為カードの並び）を開いて見るためだけの閲覧用。
 //      本文・下書きへの自動挿入は行わない（カードのコピーのみ）。管理（追加・並べ替え・削除）は「成人向け創作」の
 //      シーン進行タブで行う。データはadultSceneFlow.plansとして保持し、既存のitems/phases/selectedItemIdsとは独立。 ----
-function SceneFlowReferencePanel({ sceneFlow, onOpenEditor, onClose, preventFocusSteal, style, dictTab, onDictTabChange }){
-  const plans = sceneFlow.plans || [];
+function SceneFlowReferencePanel({ plans, onOpenEditor, onClose, onInsert, preventFocusSteal, style, dictTab, onDictTabChange }){
+  plans = plans || [];
   const [activeId, setActiveId] = useState(plans[0] ? plans[0].id : '');
   const [toast, setToast] = useState('');
   const toastTimerRef = useRef(null);
@@ -5951,51 +6017,49 @@ function SceneFlowReferencePanel({ sceneFlow, onOpenEditor, onClose, preventFocu
     const ok = await copyPlainText(text);
     showToast(ok ? 'コピーしました' : 'コピーに失敗しました');
   };
-  const copyPlan = () => {
-    if(!active) return;
-    const lines = [`【${active.title}】`, active.beforeState && `行為前の状態：${active.beforeState}`,
-      ...active.cards.map((c,i)=>`${i+1}. ${c.name}${c.memo?`\n   ${c.memo}`:''}`),
-      active.afterState && `行為後の状態：${active.afterState}`].filter(Boolean).join('\n');
-    copyText(lines);
+  const copyPlan = () => { if(active) copyText(formatSceneFlowPlanForInsert(active)); };
+  const insertPlan = () => {
+    if(!active || !onInsert) return;
+    onInsert(formatSceneFlowPlanForInsert(active));
+    showToast(`「${active.title}」を下書きへ挿入しました`);
   };
   return (
     <div className="expr-dict-panel" style={style}>
       <DictTabSwitch active={dictTab} onChange={onDictTabChange} preventFocusSteal={preventFocusSteal} />
       <div className="expr-dict-head">
-        <span className="expr-dict-entry-headword" style={{flex:'1 1 auto'}}>進行表を参照</span>
+        <span className="expr-dict-entry-headword" style={{flex:'1 1 auto'}}>シーン進行</span>
         <button type="button" className="btn btn-sm" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onOpenEditor}>
-          <span className="label-full">進行表を管理</span><span className="label-short">管理</span>
+          <span className="label-full">作成・編集</span><span className="label-short">編集</span>
         </button>
         <button type="button" className="btn btn-sm btn-ghost" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onClose}>
           <span className="label-full">閉じる</span><span className="label-short">×</span>
         </button>
       </div>
       {plans.length===0 ? (
-        <div className="empty-hint" style={{margin:'0 12px 12px'}}>まだ進行表がありません。「進行表を管理」から作成できます。</div>
+        <div className="empty-hint" style={{margin:'0 12px 12px'}}>まだシーン進行がありません。「作成・編集」から作れます。</div>
       ) : (
         <>
           <div className="dict-cat-tabs" style={{padding:'8px 12px 0'}}>
             {plans.map(p=>(
               <button key={p.id} type="button" className={"dict-cat-tab"+(active&&active.id===p.id?' active':'')}
-                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>setActiveId(p.id)}>{p.title||'無題の進行表'}</button>
+                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>setActiveId(p.id)}>{p.title||'無題のシーン進行'}{p.kind==='adult'?'（成人向け）':''}</button>
             ))}
           </div>
           <div className="expr-dict-body">
             {active && <>
-              {active.beforeState && <div className="expr-dict-entry"><div className="expr-dict-entry-head"><span className="expr-dict-entry-cat">行為前の状態</span></div><div className="expr-dict-entry-notes">{active.beforeState}</div></div>}
+              {active.beforeState && <div className="expr-dict-entry"><div className="expr-dict-entry-head"><span className="expr-dict-entry-cat">開始前の状態</span></div><div className="expr-dict-entry-notes">{active.beforeState}</div></div>}
               {active.cards.length===0 && <div className="empty-hint">まだカードがありません。</div>}
               {active.cards.map((c,i)=>(
                 <div className="expr-dict-entry" key={c.id}>
                   <div className="expr-dict-entry-head"><span className="expr-dict-entry-cat">{i+1}</span><span className="expr-dict-entry-headword">{c.name||'（無題のカード）'}</span></div>
                   {c.memo && <div className="expr-dict-entry-notes">{c.memo}</div>}
-                  <button type="button" className="btn btn-sm expr-dict-insert-btn" style={{marginTop:6}}
-                    onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
-                    onClick={()=>copyText(c.memo?`${c.name}\n${c.memo}`:c.name)}>カードをコピー</button>
                 </div>
               ))}
-              {active.afterState && <div className="expr-dict-entry"><div className="expr-dict-entry-head"><span className="expr-dict-entry-cat">行為後の状態</span></div><div className="expr-dict-entry-notes">{active.afterState}</div></div>}
-              <button type="button" className="btn btn-sm btn-primary" style={{marginTop:4}}
-                onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={copyPlan}>進行表全体をコピー</button>
+              {active.afterState && <div className="expr-dict-entry"><div className="expr-dict-entry-head"><span className="expr-dict-entry-cat">終了後の状態</span></div><div className="expr-dict-entry-notes">{active.afterState}</div></div>}
+              <div className="expr-dict-expr-actions">
+                <button type="button" className="btn btn-sm" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={copyPlan}>コピー</button>
+                {onInsert && <button type="button" className="btn btn-sm btn-primary" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={insertPlan}>下書きのカーソル位置へ挿入</button>}
+              </div>
             </>}
           </div>
         </>
@@ -7381,7 +7445,7 @@ function StoryPatternLibrary({data,setData}){
     {importOpen&&<Modal title="物語パターンJSON追加" onClose={()=>setImportOpen(false)} wide><p className="adult-tab-desc">name、category、scale、core、steps、strengths、pitfalls、examples、tags を使えます。同名はスキップします。</p><textarea rows="14" style={{width:'100%',fontFamily:'ui-monospace,monospace'}} value={importText} onChange={e=>setImportText(e.target.value)} placeholder={'{"patterns":[{"name":"新しい型","category":"冒険","scale":"長編","core":"構造の要約","steps":["開始","転換","決着"],"strengths":[],"pitfalls":[],"examples":[],"tags":[]}]}'}/>{check.error&&<div className="empty-hint" style={{color:'var(--danger)'}}>{check.error}</div>}<div className="modal-actions"><button className="btn" onClick={()=>setImportOpen(false)}>キャンセル</button><button className="btn btn-primary" disabled={!!check.error||!check.valid.length} onClick={runImport}>{check.valid.length}件を追加</button></div></Modal>}{toast&&<div className="expr-dict-toast" style={{position:'fixed',bottom:'76px'}}>{toast}</div>}</div>;
 }
 
-function AdultToolsScreen({ adultDictionary, setAdultDictionary, adultPhraseRemix, setAdultPhraseRemix, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow, setAdultSceneFlow, openTabRequest }){
+function AdultToolsScreen({ adultDictionary, setAdultDictionary, adultPhraseRemix, setAdultPhraseRemix, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow, setAdultSceneFlow, openTabRequest, appData, setAppData, onInsertToDraft }){
   const [tab, setTab] = useState('dict'); // 'dict' | 'tone' | 'phraseRemix' | 'onomatopoeia' | 'sceneFlow' | 'map'
   // 「下書き」の辞典ドロワーから「編集」「進行表を管理」で遷移してきたとき、該当タブを直接開く。
   useEffect(()=>{ if(openTabRequest && openTabRequest.tab) setTab(openTabRequest.tab); }, [openTabRequest && openTabRequest.nonce]);
@@ -7402,7 +7466,7 @@ function AdultToolsScreen({ adultDictionary, setAdultDictionary, adultPhraseRemi
       {tab==='tone' && <AdultRemixTab adultDictionary={adultDictionary} />}
       {tab==='phraseRemix' && <AdultPhraseRemixTab remixData={adultPhraseRemix} setRemixData={setAdultPhraseRemix} />}
       {tab==='onomatopoeia' && <AdultOnomatopoeiaTab data={adultOnomatopoeia} setData={setAdultOnomatopoeia} />}
-      {tab==='sceneFlow' && <AdultSceneFlowTab data={adultSceneFlow} setData={setAdultSceneFlow} />}
+      {tab==='sceneFlow' && <AdultSceneFlowTab appData={appData} setAppData={setAppData} data={adultSceneFlow} setData={setAdultSceneFlow} onInsertToDraft={onInsertToDraft} />}
       {tab==='map' && <AdultWordMapTab adultDictionary={adultDictionary} />}
     </div>
   );
@@ -7917,51 +7981,63 @@ function AdultRemixTab({ adultDictionary }){
 }
 
 // ---- シーン進行：段階別の材料を見ながら「今回の流れ」を組む。 ----
-function AdultSceneFlowTab({data,setData}){
-  // 採用仕様：シーン進行は「開始→最中→終了」を埋めるフォームではなく、行為カードを自由に追加・並べ替え・
-  // 繰り返し・削除できる道具（進行表＝plans）にする。既存の段階別材料ライブラリ（phases/items/selectedItemIds）
-  // はデータ・機能とも削除せず、「参考材料ライブラリ」として引き続き開ける。
-  const [view,setView]=useState('plans'); // 'plans'（採用：進行表カード） | 'library'（既存：段階別材料ライブラリ）
+function AdultSceneFlowTab({appData,setAppData,data,setData,onInsertToDraft}){
+  // 採用仕様：成人向けシーン進行は「共通シーン進行」と同じデータ構造・操作方法（appData.sceneFlowPlans、kind:'adult'）。
+  // 違いは、カード編集時に成人向け候補（adultSceneFlow.items、既存データ）を呼び出せることだけ。
+  // 既存の段階別材料ライブラリ（phases/items/selectedItemIds）はデータ・機能とも削除せず、
+  // 「参考材料ライブラリ」として引き続き開けるほか、カード編集時の候補としても使う。
+  const [view,setView]=useState('plans'); // 'plans'（共通シーン進行・成人向け） | 'library'（既存：段階別材料ライブラリ）
   return <div>
     <div className="story-tools-tabs">
-      <button type="button" className={'story-tools-tab'+(view==='plans'?' active':'')} onClick={()=>setView('plans')}>進行表（カード）</button>
+      <button type="button" className={'story-tools-tab'+(view==='plans'?' active':'')} onClick={()=>setView('plans')}>シーン進行（成人向け）</button>
       <button type="button" className={'story-tools-tab'+(view==='library'?' active':'')} onClick={()=>setView('library')}>参考材料ライブラリ</button>
     </div>
-    {view==='plans' ? <SceneFlowPlansEditor data={data} setData={setData}/> : <SceneFlowLibraryView data={data} setData={setData}/>}
+    {view==='plans'
+      ? <SceneFlowPlansEditor data={appData} setData={setAppData} kindFilter="adult" defaultKind="adult" adultLibrary={data} onInsertToDraft={onInsertToDraft} />
+      : <SceneFlowLibraryView data={data} setData={setData}/>}
   </div>;
 }
 
 // ---- 進行表（採用仕様）：行為カードを自由に追加・並べ替え・繰り返し・削除できる道具。
 //      開始・終了の位置は固定しない。カードは名称＋短いメモのみ。心情等はカードごとに必須にしない。
 //      シーン全体には任意入力の「行為前の状態」「行為後の状態」だけを置ける。複数保存し、下書きから参照できる。 ----
-function SceneFlowPlansEditor({data,setData}){
-  const plans=data.plans||[];
-  const active=plans.find(p=>p.id===data.activePlanId)||plans[0]||null;
+// ---- シーン進行（共通）：行為カードを自由に追加・並べ替え・繰り返し・削除できる道具。
+//      開始・終了の位置は固定しない。カードは短い見出し＋自由記述メモのみ。心情はカードごとに必須にしない。
+//      シーン全体には任意入力の「開始前の状態」「終了後の状態」だけを置ける。複数保存し、下書きから参照・挿入できる。
+//      全年齢・成人向けはkind('general'|'adult')で区別するだけで、データ構造・操作方法は完全に同じ。
+//      data/setDataはアプリ本体のトップレベルdata（sceneFlowPlansを持つ）を受け取る。
+function SceneFlowPlansEditor({data,setData,kindFilter,defaultKind,allowKindSwitch,adultLibrary,onInsertToDraft,insertLabel}){
+  const allPlans = data.sceneFlowPlans||[];
+  const plans = kindFilter && kindFilter!=='all' ? allPlans.filter(p=>p.kind===kindFilter) : allPlans;
+  const [activeId,setActiveId]=useState(plans[0]?plans[0].id:'');
+  const active = allPlans.find(p=>p.id===activeId) || plans[0] || null;
   const [cardDraft,setCardDraft]=useState(null); // {cardId, name, memo}
+  const [candidateOpen,setCandidateOpen]=useState(false);
+  const [candidateQuery,setCandidateQuery]=useState('');
   const [toast,setToast]=useState(''); const toastTimerRef=useRef(null);
   useEffect(()=>()=>{if(toastTimerRef.current)clearTimeout(toastTimerRef.current);},[]);
   const showToast=msg=>{setToast(msg);if(toastTimerRef.current)clearTimeout(toastTimerRef.current);toastTimerRef.current=setTimeout(()=>setToast(''),1400);};
 
-  const setActivePlanId=id=>setData(d=>({...d,activePlanId:id}));
+  const setActivePlanId=id=>setActiveId(id);
   const addPlan=()=>{
-    const p=makeFlowPlan(`進行表${plans.length+1}`);
-    setData(d=>({...d,plans:[...(d.plans||[]),p],activePlanId:p.id}));
+    const p=makeFlowPlan(`シーン進行${allPlans.length+1}`, defaultKind||'general');
+    setData(d=>({...d,sceneFlowPlans:[...(d.sceneFlowPlans||[]),p]}));
+    setActiveId(p.id);
   };
-  const patchActivePlan=patch=>setData(d=>({...d,plans:d.plans.map(p=>p.id===(active&&active.id)?{...p,...patch}:p)}));
+  const patchActivePlan=patch=>setData(d=>({...d,sceneFlowPlans:d.sceneFlowPlans.map(p=>p.id===(active&&active.id)?{...p,...patch}:p)}));
   const deletePlan=()=>{
-    if(!active||!confirm(`「${active.title||'この進行表'}」を削除しますか？`))return;
-    setData(d=>{
-      const rest=d.plans.filter(p=>p.id!==active.id);
-      return {...d,plans:rest,activePlanId:rest[0]?rest[0].id:null};
-    });
+    if(!active||!confirm(`「${active.title||'このシーン進行'}」を削除しますか？`))return;
+    setData(d=>({...d,sceneFlowPlans:d.sceneFlowPlans.filter(p=>p.id!==active.id)}));
+    setActiveId('');
   };
   const duplicatePlan=()=>{
     if(!active)return;
     const copy={...active,id:uid('flowplan'),title:active.title+'（複製）',cards:active.cards.map(c=>({...c,id:uid('flowcard')}))};
-    setData(d=>({...d,plans:[...d.plans,copy],activePlanId:copy.id}));
+    setData(d=>({...d,sceneFlowPlans:[...d.sceneFlowPlans,copy]}));
+    setActiveId(copy.id);
   };
 
-  // カードは追加した時点でそのまま一覧に並ぶ（＝繰り返し追加が自由）。名前・メモはタップして後から入力できる。
+  // カードは追加した時点でそのまま一覧に並ぶ（＝繰り返し追加が自由）。見出し・メモはタップして後から入力できる。
   const addCard=()=>{ if(!active)return; patchActivePlan({cards:[...active.cards,makeFlowCard('','')]}); };
   const openCard=c=>setCardDraft({cardId:c.id,name:c.name,memo:c.memo});
   const saveCard=()=>{
@@ -7974,7 +8050,7 @@ function SceneFlowPlansEditor({data,setData}){
     patchActivePlan({cards:active.cards.filter(c=>c.id!==cardId)});
     if(cardDraft&&cardDraft.cardId===cardId)setCardDraft(null);
   };
-  // 「繰り返し」＝同じカードをもう1枚、直後に複製する
+  // 「繰り返し」＝同じカードをもう1枚、直後に複製する（何度使ってもよい）
   const duplicateCard=i=>{
     if(!active)return;
     const c=active.cards[i];
@@ -7991,22 +8067,33 @@ function SceneFlowPlansEditor({data,setData}){
   };
   const copyPlan=async()=>{
     if(!active)return;
-    const lines=[`【${active.title}】`,active.beforeState&&`行為前の状態：${active.beforeState}`,
-      ...active.cards.map((c,i)=>`${i+1}. ${c.name||'（無題のカード）'}${c.memo?`\n   ${c.memo}`:''}`),
-      active.afterState&&`行為後の状態：${active.afterState}`].filter(Boolean).join('\n');
-    const ok=await copyPlainText(lines);
-    showToast(ok?'進行表をコピーしました':'コピーに失敗しました');
+    const ok=await copyPlainText(formatSceneFlowPlanForInsert(active));
+    showToast(ok?'シーン進行をコピーしました':'コピーに失敗しました');
+  };
+  const insertPlan=()=>{
+    if(!active||!onInsertToDraft)return;
+    onInsertToDraft(active);
+  };
+
+  // 成人向け候補（adultSceneFlow.items、既存データ）からカード名・メモへ取り込む。adult系プランのみ。
+  const candidateItems = (adultLibrary&&adultLibrary.items)||[];
+  const candidatePhaseName = id=>((adultLibrary&&adultLibrary.phases)||[]).find(p=>p.id===id)?.name||'';
+  const q=candidateQuery.trim().toLowerCase();
+  const filteredCandidates = candidateItems.filter(x=>!q||[x.text,x.note,candidatePhaseName(x.phaseId)].join(' ').toLowerCase().includes(q));
+  const pickCandidate=(item)=>{
+    setCardDraft(d=>({...d,name:item.text,memo:item.note||d.memo}));
+    setCandidateOpen(false);
   };
 
   return <div>
-    <p className="adult-tab-desc">「開始→最中→終了」の決まった順番はありません。行為カードを自由に追加し、好きな順に並べ替え・繰り返し・削除できます。開始・終了を必須にはしません。進行表は複数保存でき、下書き中は辞典ドロワーの「進行表」タブから参照できます。</p>
+    <p className="adult-tab-desc">「開始→最中→終了」の決まった順番はありません。行為カードを自由に追加し、好きな順に並べ替え・繰り返し・削除できます。開始・終了を必須にはしません。下書きの「シーン進行」からすぐ開いて、そのまま下書きへ挿入できます。</p>
     <div className="scene-workspace">
       <aside className="scene-list-panel">
-        <div className="dict-list-head"><span>進行表</span><button type="button" className="btn btn-sm btn-primary" onClick={addPlan}>＋</button></div>
+        <div className="dict-list-head"><span>シーン進行</span><button type="button" className="btn btn-sm btn-primary" onClick={addPlan}>＋</button></div>
         <div className="scene-list">
           {plans.map(p=>(
             <button key={p.id} type="button" className={'scene-list-item'+(active&&active.id===p.id?' active':'')} onClick={()=>setActivePlanId(p.id)}>
-              <div className="scene-list-title">{p.title||'無題の進行表'}</div>
+              <div className="scene-list-title">{p.title||'無題のシーン進行'}{p.kind==='adult'&&<span className="expr-dict-tag" style={{marginLeft:6}}>成人向け</span>}</div>
               <div className="scene-list-sub">{p.cards.length}枚</div>
             </button>
           ))}
@@ -8014,13 +8101,20 @@ function SceneFlowPlansEditor({data,setData}){
         </div>
       </aside>
       <section className="scene-editor-panel">
-        {!active ? <div className="empty-hint">左の「＋」から進行表を作成してください。</div> : <>
-          <div className="dict-field-block span-all"><label className="dict-field-label">進行表の名前</label><input value={active.title} onChange={e=>patchActivePlan({title:e.target.value})}/></div>
+        {!active ? <div className="empty-hint">左の「＋」からシーン進行を作成してください。</div> : <>
+          <div className="dict-field-block span-all"><label className="dict-field-label">シーン名</label><input value={active.title} onChange={e=>patchActivePlan({title:e.target.value})}/></div>
+          {allowKindSwitch && <div className="dict-field-block span-all">
+            <label className="dict-field-label">種類</label>
+            <div className="toolbar" style={{gap:6}}>
+              <button type="button" className={'btn btn-sm'+(active.kind==='general'?' btn-primary':'')} onClick={()=>patchActivePlan({kind:'general'})}>通常</button>
+              <button type="button" className={'btn btn-sm'+(active.kind==='adult'?' btn-primary':'')} onClick={()=>patchActivePlan({kind:'adult'})}>成人向け</button>
+            </div>
+          </div>}
           <div className="scene-meta-grid">
-            <div className="dict-field-block"><label className="dict-field-label">行為前の状態（任意）</label><textarea rows="2" value={active.beforeState} onChange={e=>patchActivePlan({beforeState:e.target.value})} placeholder="必要な場合だけ書く"/></div>
-            <div className="dict-field-block"><label className="dict-field-label">行為後の状態（任意）</label><textarea rows="2" value={active.afterState} onChange={e=>patchActivePlan({afterState:e.target.value})} placeholder="必要な場合だけ書く"/></div>
+            <div className="dict-field-block"><label className="dict-field-label">開始前の状態（任意）</label><textarea rows="2" value={active.beforeState} onChange={e=>patchActivePlan({beforeState:e.target.value})} placeholder="必要な場合だけ書く"/></div>
+            <div className="dict-field-block"><label className="dict-field-label">終了後の状態（任意）</label><textarea rows="2" value={active.afterState} onChange={e=>patchActivePlan({afterState:e.target.value})} placeholder="必要な場合だけ書く"/></div>
           </div>
-          <div className="dict-list-head" style={{marginTop:14}}><span>カード</span><span className="dict-list-count">{active.cards.length}枚</span></div>
+          <div className="dict-list-head" style={{marginTop:14}}><span>進行カード</span><span className="dict-list-count">{active.cards.length}枚</span></div>
           <button type="button" className="writing-block-insert" onClick={addCard}>＋ カードを追加</button>
           <div className="scene-flow-plan-list" style={{marginTop:8}}>
             {active.cards.map((c,i)=>(
@@ -8040,22 +8134,41 @@ function SceneFlowPlansEditor({data,setData}){
             ))}
             {!active.cards.length && <div className="empty-hint">まだカードがありません。「＋ カードを追加」から始めます。</div>}
           </div>
-          <div className="modal-actions" style={{justifyContent:'space-between',paddingBottom:0,marginTop:10}}>
-            <div><button type="button" className="btn btn-danger" onClick={deletePlan}>進行表を削除</button></div>
-            <div><button type="button" className="btn" onClick={duplicatePlan}>複製</button> <button type="button" className="btn btn-primary" onClick={copyPlan}>コピー</button></div>
+          <div className="modal-actions" style={{justifyContent:'space-between',paddingBottom:0,marginTop:10,flexWrap:'wrap',gap:8}}>
+            <div><button type="button" className="btn btn-danger" onClick={deletePlan}>削除</button></div>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+              <button type="button" className="btn" onClick={duplicatePlan}>複製</button>
+              <button type="button" className="btn" onClick={copyPlan}>コピー</button>
+              {onInsertToDraft && <button type="button" className="btn btn-primary" onClick={insertPlan}>{insertLabel||'下書きへ挿入'}</button>}
+            </div>
           </div>
         </>}
       </section>
     </div>
-    {cardDraft && <Modal title="カード" onClose={()=>setCardDraft(null)}>
-      <div className="dict-field-block"><label className="dict-field-label">行為名</label><input value={cardDraft.name} onChange={e=>setCardDraft(d=>({...d,name:e.target.value}))} placeholder="例：手をつなぐ" autoFocus/></div>
-      <div className="dict-field-block"><label className="dict-field-label">短い描写メモ（任意）</label><textarea rows="4" value={cardDraft.memo} onChange={e=>setCardDraft(d=>({...d,memo:e.target.value}))}/></div>
+    {cardDraft && <Modal title="進行カード" onClose={()=>setCardDraft(null)}>
+      <div className="dict-field-block"><label className="dict-field-label">短い見出し</label><input value={cardDraft.name} onChange={e=>setCardDraft(d=>({...d,name:e.target.value}))} placeholder="例：手をつなぐ" autoFocus/></div>
+      <div className="dict-field-block"><label className="dict-field-label">自由記述メモ（任意）</label><textarea rows="4" value={cardDraft.memo} onChange={e=>setCardDraft(d=>({...d,memo:e.target.value}))}/></div>
+      {active&&active.kind==='adult'&&adultLibrary&&<button type="button" className="btn btn-sm" onClick={()=>setCandidateOpen(true)}>成人向け候補から選ぶ</button>}
       <div className="modal-actions"><button type="button" className="btn" onClick={()=>setCardDraft(null)}>キャンセル</button><button type="button" className="btn btn-primary" onClick={saveCard}>保存</button></div>
+    </Modal>}
+    {candidateOpen && <Modal title="成人向け候補から選ぶ" onClose={()=>setCandidateOpen(false)} wide>
+      <input type="text" className="expr-dict-search" placeholder="検索" value={candidateQuery} onChange={e=>setCandidateQuery(e.target.value)} style={{marginBottom:10}}/>
+      <div className="expr-dict-body" style={{maxHeight:'50vh'}}>
+        {!filteredCandidates.length && <div className="empty-hint">候補が見つかりません。</div>}
+        {filteredCandidates.map(x=>(
+          <div className="expr-dict-entry" key={x.id}>
+            <div className="expr-dict-entry-head"><span className="expr-dict-entry-cat">{candidatePhaseName(x.phaseId)}／{x.kind}</span></div>
+            <div className="expr-dict-entry-headword">{x.text}</div>
+            {x.note && <div className="expr-dict-entry-notes">{x.note}</div>}
+            <button type="button" className="btn btn-sm btn-primary" style={{marginTop:6}} onClick={()=>pickCandidate(x)}>このカードに使う</button>
+          </div>
+        ))}
+      </div>
+      <div className="modal-actions"><button type="button" className="btn" onClick={()=>setCandidateOpen(false)}>閉じる</button></div>
     </Modal>}
     {toast && <div className="expr-dict-toast" style={{position:'fixed',bottom:'76px'}}>{toast}</div>}
   </div>;
 }
-
 // ---- 参考材料ライブラリ（既存機能）：段階別に材料を検索・登録し、「今回の流れ」へ選んで並べる。
 //      データ（phases/items/selectedItemIds）・機能とも変更なし。UI上のラベルのみ「進行表」から独立させた。 ----
 function SceneFlowLibraryView({data,setData}){
@@ -8752,6 +8865,52 @@ function App(){
   const openSceneTools = () => { setScreen('storyTools'); setDetailId(null); setQuery(''); setSceneToolsSignal(s=>s+1); };
   const [adultToolsOpenRequest, setAdultToolsOpenRequest] = useState({tab:null, nonce:0}); // 下書きの辞典ドロワー→「成人向け創作」の該当タブへ
   const openAdultTools = (tab) => { setScreen('adultTools'); setDetailId(null); setQuery(''); setAdultToolsOpenRequest({tab, nonce: Date.now()}); };
+  const openSceneFlowScreen = () => { setScreen('sceneFlow'); setDetailId(null); setQuery(''); };
+
+  // 旧・成人向けシーン進行（adultSceneFlow.plans、別ストア）から、共通シーン進行（data.sceneFlowPlans）への
+  // 一回限りの取り込み。両方のストアが揃うApp本体でのみ行える。元のadultSceneFlow.plansは削除しない（既存データ保護）。
+  useEffect(()=>{
+    if(data.sceneFlowPlansMigratedFromAdult) return;
+    const legacyPlans = (adultSceneFlow&&adultSceneFlow.plans)||[];
+    setData(d=>{
+      if(d.sceneFlowPlansMigratedFromAdult) return d;
+      const migrated = legacyPlans.map(p=>({
+        id: uid('flowplan'), title: p.title, kind:'adult', beforeState: p.beforeState||'', afterState: p.afterState||'',
+        cards: (p.cards||[]).map(c=>({id:uid('flowcard'),name:c.name||'',memo:c.memo||''})),
+      }));
+      return {...d, sceneFlowPlans:[...(d.sceneFlowPlans||[]), ...migrated], sceneFlowPlansMigratedFromAdult:true};
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  // 「下書きへ挿入」を、開いている下書きの外（成人向け創作画面・シーン進行の独立画面など）から押したときの経路。
+  // 現在開いている下書きが分からない（＝どの下書きが「開かれている」か画面上で判別できない）ため、
+  // 既存の下書きを勝手に選んで上書きすることはせず、必ず「新規下書きを作る」か「挿入先を選ぶ」を挟む。
+  // カーソル位置も分からないため、仕様どおり本文の末尾へ追記する。挿入前には必ず直前の内容を履歴へ退避する。
+  const [sceneFlowInsertTarget, setSceneFlowInsertTarget] = useState(null); // 挿入先選択モーダルの対象プラン
+  const appendPlanToDraft = (plan, draftId) => {
+    const text = formatSceneFlowPlanForInsert(plan);
+    setData(d=>{
+      let drafts = d.drafts||[];
+      let target = draftId ? drafts.find(x=>x.id===draftId && !x.deleted) : null;
+      if(!target){
+        const entry = makeDraftEntry(`「${plan.title}」より`, '', null, null);
+        drafts = [...drafts, entry];
+        target = entry;
+      }
+      const needSnapshot = !(target.history[0] && target.history[0].body===target.body);
+      const historyEntry = { body: target.body, savedAt: new Date().toISOString() };
+      const newBody = target.body ? (target.body + (/\n\n$/.test(target.body)?'':(target.body.endsWith('\n')?'\n':'\n\n')) + text) : text;
+      drafts = drafts.map(x=>x.id===target.id ? {
+        ...x, body:newBody, updatedAt:new Date().toISOString(),
+        history: needSnapshot ? [historyEntry, ...x.history].slice(0,5) : x.history,
+      } : x);
+      return {...d, drafts, activeDraftId: target.id};
+    });
+    setScreen('writing'); setWritingTab('draft'); setDetailId(null); setQuery('');
+    setSceneFlowInsertTarget(null);
+  };
+  const requestInsertPlanToDraft = (plan) => { setSceneFlowInsertTarget(plan); };
   const [syncOpen,setSyncOpen]=useState(false);
   const [syncConfig,setSyncConfig]=useState(loadCloudSyncConfig);
   const [syncState,setSyncState]=useState({phase:'idle',message:'同期キーを設定すると端末間で共有できます。'});
@@ -9058,11 +9217,17 @@ function App(){
   } else if(screen==='storyTools'){
     body = <StoryToolsScreen data={data} setData={setData} outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} openSceneSignal={sceneToolsSignal} />;
   } else if(screen==='writing'){
-    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} adultDictionary={adultDictionary} adultOnomatopoeia={adultOnomatopoeia} adultSceneFlow={adultSceneFlow} onOpenAdultTools={openAdultTools} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} />;
+    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} adultDictionary={adultDictionary} adultOnomatopoeia={adultOnomatopoeia} adultSceneFlow={adultSceneFlow} onOpenAdultTools={openAdultTools} onOpenSceneFlowScreen={openSceneFlowScreen} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} />;
   } else if(screen==='aiimport'){
     body = <AiImportScreen data={data} setData={setData} lastImportBackup={lastImportBackup} setLastImportBackup={setLastImportBackup} />;
   } else if(screen==='adultTools'){
-    body = <AdultToolsScreen adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultPhraseRemix={adultPhraseRemix} setAdultPhraseRemix={setAdultPhraseRemix} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} setAdultSceneFlow={setAdultSceneFlow} openTabRequest={adultToolsOpenRequest} />;
+    body = <AdultToolsScreen adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultPhraseRemix={adultPhraseRemix} setAdultPhraseRemix={setAdultPhraseRemix} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} setAdultSceneFlow={setAdultSceneFlow} openTabRequest={adultToolsOpenRequest} appData={data} setAppData={setData} onInsertToDraft={requestInsertPlanToDraft} />;
+  } else if(screen==='sceneFlow'){
+    body = <div>
+      <div className="toolbar"><h1>🧵 シーン進行</h1></div>
+      <p className="adult-tab-desc">全年齢・成人向けの両方で使える共通のシーン進行です。下書きの「シーン進行」からも同じ内容を参照・挿入できます。</p>
+      <SceneFlowPlansEditor data={data} setData={setData} kindFilter="all" allowKindSwitch adultLibrary={adultSceneFlow} onInsertToDraft={requestInsertPlanToDraft} />
+    </div>;
   }
 
   useEffect(()=>{ setDetailId(null); setWritingFocusMode(false); setMoreMenuOpen(false); }, [screen]);
@@ -9151,6 +9316,23 @@ function App(){
         </div>
       )}
       {syncOpen&&<CloudSyncModal syncConfig={syncConfig} setSyncConfig={setSyncConfig} syncState={syncState} onConnect={connectCloud} onPull={pullCloud} onPush={()=>pushCloud(false)} onClose={()=>setSyncOpen(false)} />}
+      {sceneFlowInsertTarget && (()=>{
+        const liveDrafts = (data.drafts||[]).filter(d=>!d.deleted).slice().sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt));
+        return (
+          <Modal title="下書きへ挿入" onClose={()=>setSceneFlowInsertTarget(null)} wide>
+            <p className="adult-tab-desc">「{sceneFlowInsertTarget.title}」をどの下書きへ挿入しますか？ 本文の末尾へ追記します。既存の下書きを上書きすることはありません。</p>
+            <button className="btn btn-primary" onClick={()=>appendPlanToDraft(sceneFlowInsertTarget, null)} style={{marginBottom:10}}>＋ 新規下書きを作って挿入</button>
+            {liveDrafts.length>0 && <div className="dict-list-head"><span>既存の下書きへ追記する</span></div>}
+            {liveDrafts.map(d=>(
+              <div className="writing-list-row" key={d.id} style={{cursor:'pointer'}} onClick={()=>appendPlanToDraft(sceneFlowInsertTarget, d.id)}>
+                <div><strong>{d.title}</strong><small style={{display:'block'}}>{new Date(d.updatedAt).toLocaleString('ja-JP')}・{d.body.length}文字</small></div>
+                <span>この下書きへ追記 →</span>
+              </div>
+            ))}
+            <div className="modal-actions"><button className="btn" onClick={()=>setSceneFlowInsertTarget(null)}>キャンセル</button></div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
