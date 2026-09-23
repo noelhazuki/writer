@@ -1805,17 +1805,71 @@ function initialData(){
     ideas: [],
     plot: { structureType: '自由構成', chapters: [] },
     writings: [],
-    draftingText: '',
+    drafts: [],
+    activeDraftId: null,
+    draftingTextLegacyBackup: '', // 旧・単一下書き(draftingText)の安全な退避用。UIでは使用しない。
     savedPassages: [],
     sceneMaps: [],
     entityRelations: [],
   };
 }
 
+// 下書き（複数保存）1件の初期値。sourceType/sourceIdは「塊」または「本文ブロック」からのコピー元を
+// 任意で記録するためのもの（必須ではない）。historyは直近5世代までの本文スナップショット。
+function makeDraftEntry(title, body, sourceType, sourceId){
+  const now = new Date().toISOString();
+  return {
+    id: uid('draft'), title: String(title||'無題の下書き'), body: String(body||''), updatedAt: now,
+    sourceType: (sourceType==='passage'||sourceType==='block') ? sourceType : null,
+    sourceId: sourceId ? String(sourceId) : null,
+    history: [], deleted:false, deletedAt:null,
+  };
+}
+function normalizeDraftEntry(d){
+  d = d || {};
+  return {
+    id: d.id || uid('draft'),
+    title: String(d.title||'無題の下書き'),
+    body: String(d.body||''),
+    updatedAt: String(d.updatedAt || new Date().toISOString()),
+    sourceType: (d.sourceType==='passage'||d.sourceType==='block') ? d.sourceType : null,
+    sourceId: d.sourceId ? String(d.sourceId) : null,
+    history: Array.isArray(d.history) ? d.history.slice(0,5).map(h=>({
+      body: String((h&&h.body)||''), savedAt: String((h&&h.savedAt)||new Date().toISOString()),
+    })) : [],
+    deleted: !!d.deleted,
+    deletedAt: d.deletedAt ? String(d.deletedAt) : null,
+  };
+}
+
 // 既存データを壊さないための不足フィールド補完。
 // 新しく追加した項目が無い旧データでも安全に動作するようにする。
 function migrateData(parsed){
-  parsed.draftingText=String(parsed.draftingText||'');
+  // 下書き：単一のdraftingTextから複数保存できるdrafts配列へ移行する。
+  // 「drafts」フィールドが存在しない（＝この機能より前の旧バックアップ）場合にのみ、
+  // 中身があれば1件の下書き「旧下書き」として作成する。draftingText自体の中身は
+  // draftingTextLegacyBackupへコピーして保持し、即座には削除しない（移行が誤っていても復旧できるように）。
+  const hadDraftsField = Array.isArray(parsed.drafts);
+  const legacyText = String(parsed.draftingText||'');
+  parsed.draftingTextLegacyBackup = String(
+    parsed.draftingTextLegacyBackup!==undefined && parsed.draftingTextLegacyBackup!==null
+      ? parsed.draftingTextLegacyBackup : legacyText
+  );
+  if(!hadDraftsField){
+    const migrated = legacyText.trim() ? [makeDraftEntry('旧下書き', legacyText, null, null)] : [];
+    parsed.drafts = migrated;
+    parsed.activeDraftId = null; // 移行直後はエディタを自動で開かず、一覧から選んで開く形にする
+  } else {
+    parsed.drafts = parsed.drafts.map(normalizeDraftEntry);
+    const liveIds = new Set(parsed.drafts.filter(d=>!d.deleted).map(d=>d.id));
+    // activeDraftIdがnull（＝一覧を表示する状態）は正常な状態としてそのまま保持する。
+    // 存在しない下書きや削除済みの下書きを指しているときだけ、一覧へ戻す（null）。
+    if(parsed.activeDraftId && !liveIds.has(parsed.activeDraftId)){
+      parsed.activeDraftId = null;
+    }
+  }
+  delete parsed.draftingText; // 新形式へ移行済み。中身はdraftingTextLegacyBackupに退避済みなので消えない。
+
   parsed.savedPassages=Array.isArray(parsed.savedPassages)?parsed.savedPassages.map(p=>({...p,id:p.id||uid('passage'),title:String(p.title||'無題の塊'),body:String(p.body||''),memo:String(p.memo||''),version:String(p.version||'ver1')})):[];
   parsed.sceneMaps=Array.isArray(parsed.sceneMaps)?parsed.sceneMaps.map(m=>({...m,id:m.id||uid('map'),title:String(m.title||'新しい話'),items:Array.isArray(m.items)?m.items.map(i=>({...i,id:i.id||uid('mapitem'),title:String(i.title||''),memo:String(i.memo||'')})):[]})):[];
   if(!parsed.worldSettings) parsed.worldSettings = initialData().worldSettings;
@@ -4238,6 +4292,18 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const [mediaDictEditorOpen, setMediaDictEditorOpen] = useState(false);
   const [writingMoreOpen, setWritingMoreOpen] = useState(false); // スマホ「⋯」：文字サイズ／メモへ移動／章削除
   const [memoOpenSignal, setMemoOpenSignal] = useState(0); // 「⋯」→メモ・関連情報を開く、の合図（値が変わるたびにCollapsibleSectionを開く）
+  const [draftShowTrash, setDraftShowTrash] = useState(false); // 下書き一覧：ゴミ箱（論理削除済み）を表示中か
+  const [draftRenameId, setDraftRenameId] = useState(null); // 下書き一覧の「見出し変更」モーダル対象
+  const [draftRenameText, setDraftRenameText] = useState('');
+  const [draftHistoryOpen, setDraftHistoryOpen] = useState(false); // 下書きエディタ：履歴（直前版）モーダル
+  const [draftToast, setDraftToast] = useState('');
+  const draftToastTimerRef = useRef(null);
+  useEffect(()=>()=>{ if(draftToastTimerRef.current) clearTimeout(draftToastTimerRef.current); }, []);
+  const showDraftToast = (msg) => {
+    setDraftToast(msg);
+    if(draftToastTimerRef.current) clearTimeout(draftToastTimerRef.current);
+    draftToastTimerRef.current = setTimeout(()=>setDraftToast(''), 1600);
+  };
   const memoSectionRef = useRef(null);
   const textareaRef = useRef(null);
   const savedSelectionRef = useRef({ start:0, end:0 });
@@ -4287,10 +4353,100 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     if(!body.trim())return;
     setData(d=>({...d,savedPassages:[...(d.savedPassages||[]),{id:uid('passage'),title:title.trim()||'無題の塊',body,memo,version}]}));
   };
+  // ---- 下書き（複数保存）。activeDraftIdが指し示す1件だけを編集対象にする。
+  //      「塊を下書きへ」「本文を下書きへ」は必ずここで新しい下書きを作る＝既存の下書きを上書きしない。 ----
+  const liveDrafts = (data.drafts||[]).filter(d=>!d.deleted);
+  const trashedDrafts = (data.drafts||[]).filter(d=>d.deleted);
+  const activeDraft = liveDrafts.find(d=>d.id===data.activeDraftId) || null;
+
   const selectedDraftText=()=>{
-    const el=textareaRef.current,body=data.draftingText||'';
+    const el=textareaRef.current, body=activeDraft?activeDraft.body:'';
     return el&&el.selectionStart!==el.selectionEnd?body.slice(el.selectionStart,el.selectionEnd):body;
   };
+  // 直前版の記録。履歴は最新5件まで（古いものから捨てる）。直前と同じ内容なら追加しない。
+  const pushDraftHistory=(draftId,body)=>{
+    setData(d=>({...d,drafts:(d.drafts||[]).map(x=>{
+      if(x.id!==draftId)return x;
+      if(x.history[0]&&x.history[0].body===body)return x;
+      return {...x,history:[{body,savedAt:new Date().toISOString()},...x.history].slice(0,5)};
+    })}));
+  };
+  // 自動保存とは別に、下書きを開いている間は20秒おきに変更があれば直前版として記録する（最低5世代保持）。
+  useEffect(()=>{
+    if(workspaceTab!=='draft'||!activeDraft)return;
+    const draftId=activeDraft.id;
+    const timer=setInterval(()=>{
+      setData(d=>{
+        const x=(d.drafts||[]).find(v=>v.id===draftId);
+        if(!x)return d;
+        if(x.history[0]&&x.history[0].body===x.body)return d;
+        return {...d,drafts:d.drafts.map(v=>v.id===draftId?{...v,history:[{body:v.body,savedAt:new Date().toISOString()},...v.history].slice(0,5)}:v)};
+      });
+    },20000);
+    return ()=>clearInterval(timer);
+  },[workspaceTab,activeDraft&&activeDraft.id]);
+
+  const setDraftBody=(text)=>{
+    if(!activeDraft)return;
+    setData(d=>({...d,drafts:(d.drafts||[]).map(x=>x.id===activeDraft.id?{...x,body:text,updatedAt:new Date().toISOString()}:x)}));
+  };
+  const setDraftTitle=(title)=>{
+    if(!activeDraft)return;
+    setData(d=>({...d,drafts:(d.drafts||[]).map(x=>x.id===activeDraft.id?{...x,title,updatedAt:new Date().toISOString()}:x)}));
+  };
+  const openDraft=(id)=>{ setPaletteOpen(false);setExprDictOpen(false); setData(d=>({...d,activeDraftId:id})); };
+  const backToDraftList=()=>{ setPaletteOpen(false);setExprDictOpen(false);setDraftHistoryOpen(false); setData(d=>({...d,activeDraftId:null})); };
+  const addBlankDraft=()=>{
+    const entry=makeDraftEntry('無題の下書き','',null,null);
+    setData(d=>({...d,drafts:[...(d.drafts||[]),entry],activeDraftId:entry.id}));
+  };
+  // 「塊を下書きへ」「本文を下書きへ」共通：必ず新しい下書きを作る。既存の下書きには一切触れない。
+  const createDraftFromSource=(sourceType,sourceId,title,body)=>{
+    const entry=makeDraftEntry(title||'無題の下書き',body||'',sourceType,sourceId);
+    setData(d=>({...d,drafts:[...(d.drafts||[]),entry],activeDraftId:entry.id}));
+    setWorkspaceTab('draft');
+    showDraftToast(`新しい下書き「${entry.title}」を作成しました（既存の下書きはそのままです）`);
+  };
+  const openRenameDraft=(d)=>{ setDraftRenameId(d.id); setDraftRenameText(d.title); };
+  const saveRenameDraft=()=>{
+    if(!draftRenameId)return;
+    const title=draftRenameText.trim()||'無題の下書き';
+    setData(d=>({...d,drafts:(d.drafts||[]).map(x=>x.id===draftRenameId?{...x,title,updatedAt:new Date().toISOString()}:x)}));
+    setDraftRenameId(null);setDraftRenameText('');
+  };
+  const duplicateDraft=(d)=>{
+    const copy={...makeDraftEntry(d.title+'（複製）',d.body,d.sourceType,d.sourceId)};
+    setData(dd=>({...dd,drafts:[...dd.drafts,copy],activeDraftId:copy.id}));
+    showDraftToast(`「${d.title}」を複製しました`);
+  };
+  // ゴミ箱へ（論理削除）。中身は消えず、復元できる。
+  const softDeleteDraft=(d)=>{
+    if(!confirm(`「${d.title}」をゴミ箱へ移動しますか？あとで「ゴミ箱」から復元できます。`))return;
+    setData(dd=>({...dd,drafts:dd.drafts.map(x=>x.id===d.id?{...x,deleted:true,deletedAt:new Date().toISOString()}:x),activeDraftId:dd.activeDraftId===d.id?null:dd.activeDraftId}));
+    showDraftToast(`「${d.title}」をゴミ箱へ移動しました`);
+  };
+  const restoreDraftFromTrash=(d)=>{
+    setData(dd=>({...dd,drafts:dd.drafts.map(x=>x.id===d.id?{...x,deleted:false,deletedAt:null}:x)}));
+    showDraftToast(`「${d.title}」を復元しました`);
+  };
+  const permanentlyDeleteDraft=(d)=>{
+    if(!confirm(`「${d.title}」を完全に削除します。この操作は元に戻せません。よろしいですか？`))return;
+    setData(dd=>({...dd,drafts:dd.drafts.filter(x=>x.id!==d.id)}));
+  };
+  // 履歴（直前版）から復元する。現在の内容も、消えないよう先に履歴へ積んでから置き換える。
+  const restoreDraftHistory=(entry)=>{
+    if(!activeDraft)return;
+    if(!confirm(`下書き「${activeDraft.title}」を、${new Date(entry.savedAt).toLocaleString('ja-JP')}時点の内容に置き換えますか？\n（現在の内容は置き換え前に履歴へ保存されます）`))return;
+    setData(d=>({...d,drafts:d.drafts.map(x=>{
+      if(x.id!==activeDraft.id)return x;
+      const keepCurrent=(x.history[0]&&x.history[0].body===x.body)?x.history:[{body:x.body,savedAt:new Date().toISOString()},...x.history].slice(0,5);
+      return {...x,body:entry.body,updatedAt:new Date().toISOString(),history:keepCurrent};
+    })}));
+    setDraftHistoryOpen(false);
+    showDraftToast('選んだ版に置き換えました');
+  };
+
+  const draftBody = activeDraft ? activeDraft.body : '';
   // 保管棚の塊を、指定した章の末尾へ新しい場面として「コピー」する。保管元（保管棚）と本文は同期しない。
   const placePassage=(passage,chapter)=>{
     const block={id:uid('wblock'),title:passage.title,body:passage.body,memo:passage.memo||'',kind:'normal',status:'執筆中',adultNote:''};
@@ -4332,10 +4488,6 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const openChapter = openId ? data.writings.find(w=>w.id===openId) : null;
   const activeBlock=openChapter&&(openChapter.blocks||[]).find(b=>b.id===activeBlockId)||(openChapter&&openChapter.blocks&&openChapter.blocks[0]);
   const open=openChapter&&activeBlock?{...openChapter,body:activeBlock.body}:null;
-
-  // ---- 下書き（自由に書いて推敲する場所）の本体。章とは独立した1本のテキスト ----
-  const draftBody = data.draftingText || '';
-  const setDraftBody = (text) => setData(d=>({...d, draftingText:text}));
 
   const blockBoard = openChapter&&<div className="writing-block-board">
     <div className="writing-block-toolbar"><strong>文章ブロック</strong><button className="btn btn-sm" onClick={()=>setReadAll(x=>!x)}>{readAll?'一覧に戻る':'通して読む'}</button></div>
@@ -4620,7 +4772,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   // ============================================================
   // 下書き：集中モード（自由に書いて推敲する場所。章とは独立）
   // ============================================================
-  if(workspaceTab==='draft' && focusMode){
+  if(workspaceTab==='draft' && focusMode && activeDraft){
     return (
       <div className="writing-focus">
         <div className="writing-focus-header">
@@ -4628,7 +4780,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
             <button type="button" className="writing-back-btn" onClick={()=>setFocusMode(false)} title="集中モードを終了" aria-label="集中モードを終了">
               <span className="wh-back-full">← 集中終了</span><span className="wh-back-short">←</span>
             </button>
-            <div className="writing-focus-title" style={{fontWeight:700}}>下書き</div>
+            <div className="writing-focus-title" style={{fontWeight:700}}>{activeDraft.title}</div>
             <span className="wordcount">{draftBody.length.toLocaleString()} 文字</span>
           </div>
           <div className="writing-header-row2">
@@ -4687,7 +4839,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
           {activeBlock&&activeBlock.body ? activeBlock.body : <span className="writing-block-placeholder">まだ本文がありません。下書きで書いて塊として保存し、保管棚からこの場面に戻す（置き換える）か、保管棚から新しい場面としてコピーしてください。</span>}
         </div>
         <div className="toolbar" style={{marginTop:10}}>
-          <button className="btn btn-sm" onClick={()=>{ setDraftBody(activeBlock?activeBlock.body:''); setWorkspaceTab('draft'); }}>この場面を下書きへコピーして直す</button>
+          <button className="btn btn-sm" onClick={()=>{ if(activeBlock) createDraftFromSource('block',activeBlock.id,activeBlock.title,activeBlock.body); }}>この場面を新しい下書きへコピー</button>
         </div>
         {writingMoreBlock}
         <div style={{marginTop:14}} ref={memoSectionRef}>
@@ -4716,8 +4868,52 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         <button className={'story-tools-tab'+(workspaceTab==='map'?' active':'')} onClick={()=>setWorkspaceTab('map')}>シーンの地図</button>
         <button className={'story-tools-tab'+(workspaceTab==='chapters'?' active':'')} onClick={()=>setWorkspaceTab('chapters')}>本文</button>
       </div>
-      {workspaceTab==='draft'&&<div className="writing-block-board">
-        <p className="adult-tab-desc">順番を気にせず書く場所です。選択した範囲、または全文を塊として保存できます。表現パレット・各辞典もここで使えます。</p>
+      {workspaceTab==='draft' && !activeDraft && <div className="writing-block-board">
+        <p className="adult-tab-desc">下書きは何件でも保存できます。塊や本文を下書きへ送ると、必ず新しい下書きが作られます（既存の下書きは上書きされません）。</p>
+        <div className="toolbar">
+          <button className="btn btn-primary" onClick={addBlankDraft}>＋ 新しい下書き</button>
+          <span className="filler" />
+          <button className="btn btn-sm" onClick={()=>setDraftShowTrash(x=>!x)}>{draftShowTrash?'一覧へ戻る':`ゴミ箱（${trashedDrafts.length}）`}</button>
+        </div>
+        {!draftShowTrash ? <>
+          {!liveDrafts.length && <div className="empty-hint">まだ下書きがありません。「＋ 新しい下書き」から始められます。</div>}
+          {liveDrafts.slice().sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt)).map(d=>(
+            <div className="writing-list-row" key={d.id} style={{cursor:'pointer'}}>
+              <button type="button" className="writing-block-select" style={{flex:1}} onClick={()=>openDraft(d.id)}>
+                <strong>{d.title}</strong>
+                <small>{new Date(d.updatedAt).toLocaleString('ja-JP')}・{d.body.length}文字{d.sourceType?(d.sourceType==='passage'?'・塊から':'・本文から'):''}</small>
+                <span>{d.body.slice(0,60)||'（本文なし）'}</span>
+              </button>
+              <div className="writing-block-actions">
+                <button type="button" className="btn btn-sm" onClick={()=>openRenameDraft(d)}>見出し変更</button>
+                <button type="button" className="btn btn-sm" onClick={()=>duplicateDraft(d)}>複製</button>
+                <button type="button" className="btn btn-sm btn-danger" onClick={()=>softDeleteDraft(d)}>削除</button>
+              </div>
+            </div>
+          ))}
+        </> : <>
+          <p className="adult-tab-desc">ゴミ箱の下書きは復元するか、完全に削除するまで残ります。</p>
+          {!trashedDrafts.length && <div className="empty-hint">ゴミ箱は空です。</div>}
+          {trashedDrafts.slice().sort((a,b)=>new Date(b.deletedAt)-new Date(a.deletedAt)).map(d=>(
+            <div className="writing-block-card" key={d.id}>
+              <div><strong>{d.title}</strong><p>{d.body.slice(0,80)||'（本文なし）'}</p><small>削除日時：{d.deletedAt?new Date(d.deletedAt).toLocaleString('ja-JP'):''}</small></div>
+              <div className="writing-block-actions">
+                <button type="button" className="btn btn-sm btn-primary" onClick={()=>restoreDraftFromTrash(d)}>復元</button>
+                <button type="button" className="btn btn-sm btn-danger" onClick={()=>permanentlyDeleteDraft(d)}>完全に削除</button>
+              </div>
+            </div>
+          ))}
+        </>}
+      </div>}
+      {workspaceTab==='draft' && activeDraft && <div className="writing-block-board">
+        <div className="writing-header-row1">
+          <button type="button" className="writing-back-btn" onClick={backToDraftList} title="下書き一覧に戻る" aria-label="下書き一覧に戻る">
+            <span className="wh-back-full">← 下書き一覧</span><span className="wh-back-short">←</span>
+          </button>
+          <input className="writing-title-input" value={activeDraft.title} onChange={e=>setDraftTitle(e.target.value)} placeholder="下書きの見出し" />
+          <span className="wordcount">{draftBody.length.toLocaleString()} 文字</span>
+        </div>
+        <p className="adult-tab-desc">選択した範囲、または全文を塊として保存できます。表現パレット・各辞典もここで使えます。</p>
         <div className="writing-header-row2" style={{marginBottom:8}}>
           <button className="btn btn-sm" onClick={()=>setFocusMode(true)}><span className="wh-label-full">集中モード</span><span className="wh-label-short">集中</span></button>
           <button type="button" className={"btn btn-sm"+(paletteOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={togglePalette}>
@@ -4726,6 +4922,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
           <button type="button" className={"btn btn-sm"+(exprDictOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleExprDict}>
             <span className="wh-label-full">表現辞典</span><span className="wh-label-short">辞典</span>
           </button>
+          <button type="button" className="btn btn-sm" onClick={()=>setDraftHistoryOpen(true)}>履歴</button>
           <span className="writing-only-desktop"><FontSizeControl value={writingFontSize} onChange={setWritingFontSize} /></span>
           <button type="button" className="btn btn-sm writing-more-btn writing-only-mobile" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleWritingMore} aria-label="その他の操作" title="その他の操作">⋯</button>
         </div>
@@ -4738,7 +4935,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
       </div>}
       {workspaceTab==='shelf'&&<div className="writing-block-board">
         <p className="adult-tab-desc">本文へ置くと文章がコピーされます。保管元と本文は同期しません。保管した版（ver1、ver2…）はそれぞれ別々に残ります。</p>
-        {(data.savedPassages||[]).map(p=><div className="writing-block-card" key={p.id}><div><strong>{p.title}（{p.version}）</strong><p>{p.memo||p.body.slice(0,100)}</p><small>{p.body.length}文字</small></div><div className="writing-block-actions"><button className="btn btn-sm" onClick={()=>setPassageDraft({...p,fromDraft:true,version:'ver2'})}>見て新しい版を保存</button>{data.writings.map(w=><button key={w.id} className="btn btn-sm" onClick={()=>placePassage(p,w)}>{w.title}へコピー</button>)}<button className="btn btn-sm btn-danger" onClick={()=>{if(confirm('保管棚から削除しますか？'))setData(d=>({...d,savedPassages:d.savedPassages.filter(x=>x.id!==p.id)}))}}>削除</button></div></div>)}
+        {(data.savedPassages||[]).map(p=><div className="writing-block-card" key={p.id}><div><strong>{p.title}（{p.version}）</strong><p>{p.memo||p.body.slice(0,100)}</p><small>{p.body.length}文字</small></div><div className="writing-block-actions"><button className="btn btn-sm" onClick={()=>createDraftFromSource('passage',p.id,p.title,p.body)}>新しい下書きへコピー</button><button className="btn btn-sm" onClick={()=>setPassageDraft({...p,fromDraft:true,version:'ver2'})}>見て新しい版を保存</button>{data.writings.map(w=><button key={w.id} className="btn btn-sm" onClick={()=>placePassage(p,w)}>{w.title}へコピー</button>)}<button className="btn btn-sm btn-danger" onClick={()=>{if(confirm('保管棚から削除しますか？'))setData(d=>({...d,savedPassages:d.savedPassages.filter(x=>x.id!==p.id)}))}}>削除</button></div></div>)}
         {!(data.savedPassages||[]).length&&<div className="empty-hint">保存した塊がここに並びます。</div>}
       </div>}
       {workspaceTab==='map'&&<div className="writing-block-board">
@@ -4764,6 +4961,22 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
       </div>}
       {passageDraft&&<Modal title="塊の保存" onClose={()=>setPassageDraft(null)} wide><div className="field-row"><label>見出し</label><input value={passageDraft.title} onChange={e=>setPassageDraft(d=>({...d,title:e.target.value}))}/></div><div className="field-row"><label>版</label><input value={passageDraft.version} onChange={e=>setPassageDraft(d=>({...d,version:e.target.value}))}/></div><div className="field-row"><label>メモ</label><textarea rows="3" value={passageDraft.memo} onChange={e=>setPassageDraft(d=>({...d,memo:e.target.value}))}/></div><div className="field-row"><label>文章</label><textarea rows="12" style={{width:'100%'}} value={passageDraft.body} onChange={e=>setPassageDraft(d=>({...d,body:e.target.value}))}/></div><div className="modal-actions"><button className="btn" onClick={()=>setPassageDraft(null)}>キャンセル</button><button className="btn btn-primary" onClick={()=>{if(!passageDraft.body.trim())return;setData(d=>({...d,savedPassages:passageDraft.fromDraft?[...d.savedPassages,{id:uid('passage'),title:passageDraft.title,body:passageDraft.body,memo:passageDraft.memo,version:passageDraft.version}]:d.savedPassages.map(x=>x.id===passageDraft.id?passageDraft:x)}));setPassageDraft(null)}}>保存</button></div></Modal>}
       {mapDraft&&<Modal title="地図の出来事" onClose={()=>setMapDraft(null)}><div className="field-row"><label>見出し</label><input value={mapDraft.item.title} onChange={e=>setMapDraft(d=>({...d,item:{...d.item,title:e.target.value}}))}/></div><div className="field-row"><label>自由メモ</label><textarea rows="8" value={mapDraft.item.memo} onChange={e=>setMapDraft(d=>({...d,item:{...d.item,memo:e.target.value}}))}/></div><div className="modal-actions"><button className="btn" onClick={()=>setMapDraft(null)}>キャンセル</button><button className="btn btn-primary" onClick={()=>{setData(d=>({...d,sceneMaps:d.sceneMaps.map(x=>x.id!==mapDraft.mapId?x:{...x,items:x.items.map(i=>i.id===mapDraft.item.id?mapDraft.item:i)})}));setMapDraft(null)}}>保存</button></div></Modal>}
+      {draftRenameId&&<Modal title="下書きの見出し変更" onClose={()=>{setDraftRenameId(null);setDraftRenameText('');}}>
+        <div className="field-row"><label>見出し</label><input value={draftRenameText} onChange={e=>setDraftRenameText(e.target.value)} autoFocus/></div>
+        <div className="modal-actions"><button className="btn" onClick={()=>{setDraftRenameId(null);setDraftRenameText('');}}>キャンセル</button><button className="btn btn-primary" onClick={saveRenameDraft}>保存</button></div>
+      </Modal>}
+      {draftHistoryOpen&&activeDraft&&<Modal title={`「${activeDraft.title}」の履歴`} onClose={()=>setDraftHistoryOpen(false)} wide>
+        <p className="adult-tab-desc">自動保存とは別に、直前の版を最大5世代まで保存しています。選ぶと今の内容と置き換わります（今の内容も履歴に残ります）。</p>
+        {!activeDraft.history.length && <div className="empty-hint">まだ履歴はありません。編集を続けると自動的に記録されます。</div>}
+        {activeDraft.history.map((h,i)=>(
+          <div className="writing-block-card" key={i}>
+            <div><strong>{new Date(h.savedAt).toLocaleString('ja-JP')}</strong><p>{h.body.slice(0,100)||'（本文なし）'}</p><small>{h.body.length}文字</small></div>
+            <div className="writing-block-actions"><button className="btn btn-sm btn-primary" onClick={()=>restoreDraftHistory(h)}>この版に戻す</button></div>
+          </div>
+        ))}
+        <div className="modal-actions"><button className="btn" onClick={()=>setDraftHistoryOpen(false)}>閉じる</button></div>
+      </Modal>}
+      {draftToast && <div className="expr-dict-toast" style={{position:'fixed',bottom:'76px'}}>{draftToast}</div>}
       {paletteBlock}
       {exprDictBlock}
       {dictEditorBlock}
