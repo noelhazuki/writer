@@ -261,12 +261,18 @@
   .quickbar-collapsed-btn{ flex:1 1 auto; min-height:36px; font-size:12px; font-weight:700; color:var(--ink-soft); background:none; border:none; text-align:left; padding:4px 2px; }
   .writing-focus .quickbar{ padding-bottom:calc(6px + env(safe-area-inset-bottom)); }
   .quickbar-inline{ position:sticky; bottom:0; z-index:30; margin-top:8px; border:1px solid var(--line); border-radius:var(--radius-s); box-shadow:0 -2px 8px rgba(30,28,25,0.06); }
+  /* 執筆記号ショートカットバー：下書きtextareaフォーカス中だけ、クイック表現バーの直上に固定表示する常設1段バー */
+  .symbolbar{ position:fixed; left:0; right:0; margin:0 auto; max-width:1000px; width:100%; box-sizing:border-box; display:flex; align-items:center; gap:6px; background:#fffdf8; border:1px solid var(--line); border-top:1px solid var(--line); padding:6px 8px calc(6px + env(safe-area-inset-bottom)); z-index:35; box-shadow:0 -2px 8px rgba(30,28,25,0.06); }
+  .symbolbar-btn{ flex:0 0 auto; min-height:42px; min-width:42px; padding:0 14px; font-size:16px; font-family:"Shippori Mincho",serif; border:1px solid var(--line); border-radius:8px; background:#fffdf8; color:var(--ink); display:flex; align-items:center; justify-content:center; white-space:nowrap; }
+  .symbolbar-btn:hover{ background:var(--paper-dim); }
   @media (max-width:880px){
     .quickbar-inline{ bottom:calc(56px + env(safe-area-inset-bottom)); }
     .quickbar{ padding:4px 6px; }
     .quickbar-btn{ min-height:38px; min-width:38px; padding:0 10px; }
     .quickbar-list-btn{ min-height:38px; padding:0 10px; }
     .quickbar-collapse-btn{ min-height:38px; padding:0 8px; }
+    .symbolbar{ padding:4px 6px calc(4px + env(safe-area-inset-bottom)); gap:4px; }
+    .symbolbar-btn{ min-height:38px; min-width:38px; padding:0 10px; font-size:15px; }
   }
 
   /* 辞書編集（表現パレット辞書・表現辞典で共通の「一覧→詳細」階層UI） */
@@ -4331,6 +4337,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const [draftRenameId, setDraftRenameId] = useState(null); // 下書き一覧の「見出し変更」モーダル対象
   const [draftRenameText, setDraftRenameText] = useState('');
   const [draftHistoryOpen, setDraftHistoryOpen] = useState(false); // 下書きエディタ：履歴（直前版）モーダル
+  const [draftFocused, setDraftFocused] = useState(false); // 下書きtextareaにフォーカスがあるか（執筆記号ショートカットバーの表示制御用）
   const [draftToast, setDraftToast] = useState('');
   const draftToastTimerRef = useRef(null);
   useEffect(()=>()=>{ if(draftToastTimerRef.current) clearTimeout(draftToastTimerRef.current); }, []);
@@ -4354,6 +4361,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const quickbarHeight = useMeasuredHeight(quickbarWrapRef, [focusMode, openId, workspaceTab]);
   const keyboardInset = useKeyboardInset();
   const paletteBottomOffset = (focusMode ? quickbarHeight : bottomTabsHeight) + keyboardInset;
+  // 執筆記号ショートカットバー：クイック表現バーのすぐ上に重ならないよう積む（クイック表現バーの実高さ分だけさらに上へ）
+  const symbolBarBottomOffset = (focusMode ? quickbarHeight : bottomTabsHeight + quickbarHeight) + keyboardInset;
 
   const setWritingFontSize = (px) => {
     const clamped = clamp(px, WRITING_FONT_SIZE_MIN, WRITING_FONT_SIZE_MAX);
@@ -4825,6 +4834,15 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     </div>
   ) : null;
 
+  // ---- 執筆記号ショートカットバー：「」――……の4記号を、下書きtextareaにフォーカスがある間だけ常設表示（表現パレットとは別機能） ----
+  const symbolBarBlock = (draftFocused && !paletteOpen && !exprDictOpen) ? (
+    <PunctuationShortcutBar
+      onInsert={insertIntoBody}
+      preventFocusSteal={preventFocusSteal}
+      style={{ bottom: symbolBarBottomOffset + 'px' }}
+    />
+  ) : null;
+
   // ============================================================
   // 下書き：集中モード（自由に書いて推敲する場所。章とは独立）
   // ============================================================
@@ -4853,10 +4871,13 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         <div className="writing-focus-body-wrap" ref={focusBodyWrapRef}>
           <textarea ref={textareaRef} className="writing-body-area writing-body-area-focus" style={{fontSize:writingFontSize}} value={draftBody}
             onChange={e=>{ setDraftBody(e.target.value); rememberEditorState(); }}
-            onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState} onBlur={rememberEditorState}
+            onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState}
+            onFocus={()=>{ setDraftFocused(true); rememberEditorState(); }}
+            onBlur={()=>{ rememberEditorState(); setDraftFocused(false); }}
             placeholder="思いついた文章をここに…" autoFocus />
         </div>
         {!paletteOpen && !exprDictOpen && quickbarBlock}
+        {symbolBarBlock}
         {paletteBlock}
         {exprDictBlock}
         {dictEditorBlock}
@@ -4991,9 +5012,12 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         </div>
         <textarea id="drafting-area" ref={textareaRef} className="writing-body-area" style={{fontSize:writingFontSize}} value={draftBody}
           onChange={e=>{ setDraftBody(e.target.value); rememberEditorState(); }}
-          onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState} onBlur={rememberEditorState}
+          onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState}
+          onFocus={()=>{ setDraftFocused(true); rememberEditorState(); }}
+          onBlur={()=>{ rememberEditorState(); setDraftFocused(false); }}
           placeholder="思いついた文章をここに…" />
         {!paletteOpen && !exprDictOpen && quickbarBlock}
+        {symbolBarBlock}
         <div className="toolbar"><button className="btn btn-primary" onClick={()=>{const body=selectedDraftText();if(!body.trim())return;setPassageDraft({title:'新しい塊',body,memo:'',version:'ver1',fromDraft:true})}}>選択範囲／全文を塊として保存</button>{data.writings.map(w=><button className="btn btn-sm" key={w.id} onClick={()=>{const body=selectedDraftText();if(body.trim())placePassage({title:'下書きからの場面',body,memo:''},w)}}>{w.title}へ直接置く</button>)}</div>
       </div>}
       {workspaceTab==='shelf'&&<div className="writing-block-board">
@@ -5091,6 +5115,28 @@ function QuickExpressionBar({ snippets, collapsed, onToggleCollapse, onInsert, o
       )}
       <button type="button" className="quickbar-list-btn" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onOpenPalette}>一覧</button>
       <button type="button" className="quickbar-collapse-btn" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={onToggleCollapse}>∨</button>
+    </div>
+  );
+}
+
+// ---- 執筆記号ショートカットバー（「」――……をカーソル位置へ1タップ挿入。表現パレット・クイック表現バーとは別データ・別UI） ----
+// 表示制御（フォーカス中のみ）は呼び出し元（Writing）が行い、このコンポーネント自体は常に4ボタンを出す。
+const PUNCTUATION_SHORTCUTS = [
+  { key:'open', label:'「', text:'「' },
+  { key:'close', label:'」', text:'」' },
+  { key:'dash', label:'――', text:'――' },
+  { key:'ellipsis', label:'……', text:'……' },
+];
+function PunctuationShortcutBar({ onInsert, preventFocusSteal, style }){
+  return (
+    <div className="symbolbar" style={style}>
+      {PUNCTUATION_SHORTCUTS.map(it=>(
+        <button key={it.key} type="button" className="symbolbar-btn"
+          onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+          onClick={()=>onInsert(it.text)}>
+          {it.label}
+        </button>
+      ))}
     </div>
   );
 }
