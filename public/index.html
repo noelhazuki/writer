@@ -643,7 +643,8 @@
     .field-row input[type=text], .field-row input[type=number], .field-row textarea, .field-row select,
     .customfield-row input, .customfield-row textarea, .linkpicker input, .idea-quickbar textarea,
     .idea-quickbar select, .imgrid .img-item input, .topbar input.proj-title, .searchbox input,
-    .ws-category-head input, .plot-chapter-head input, .plot-scene textarea { font-size:16px; }
+    .ws-category-head input, .plot-chapter-head input, .plot-scene textarea,
+    .slider-field-number { font-size:16px; }
   }
 
   .group-block{ margin-bottom:16px; }
@@ -651,6 +652,45 @@
   .group-head .chev{ font-size:11px; color:var(--ink-soft); transition:transform .15s; }
   .tag-filter-row{ display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; }
   .section-preview{ font-size:12.5px; color:var(--ink-soft); margin:-4px 0 6px 19px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; }
+
+  /* キャラクター設定：入力欄の近くに出す説明・入力例（プレースホルダーが消えても読めるよう常時表示） */
+  .field-hint{ font-size:12px; color:var(--ink-soft); line-height:1.6; margin:2px 0 8px; }
+
+  /* キャラクター設定：数値入力とスライダーを連動させる項目（身長・体重など） */
+  .slider-field{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .slider-field-number{ width:88px; flex:0 0 auto; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font-size:14px; }
+  .slider-field-unit{ font-size:12px; color:var(--ink-soft); flex:0 0 auto; }
+  .slider-field-range{ flex:1 1 120px; min-width:100px; }
+  .slider-field-reset{ background:none; border:none; color:var(--accent-soft); font-size:11px; padding:0 2px; cursor:pointer; flex:0 0 auto; white-space:nowrap; }
+
+  /* キャラクター設定：左右対比を5段階で選ぶ項目（性格・信仰思想など） */
+  .scale-field{ margin-bottom:16px; }
+  .scale-field-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+  .scale-field-label{ font-size:12.5px; color:var(--ink-soft); font-weight:500; }
+  .scale-field-reset{ background:none; border:none; color:var(--accent-soft); font-size:11px; padding:0; cursor:pointer; flex:0 0 auto; white-space:nowrap; }
+  .scale-field-row{ display:flex; align-items:center; gap:6px; }
+  .scale-field-side{ font-size:11.5px; color:var(--ink); flex:0 0 auto; max-width:30%; line-height:1.4; }
+  .scale-field-dots{ flex:1 1 auto; display:flex; justify-content:space-between; align-items:center; gap:3px; padding:0 2px; min-width:0; }
+  .scale-dot{ width:26px; height:26px; border-radius:50%; border:1px solid var(--line); background:var(--card); flex:0 0 auto; padding:0; }
+  .scale-dot.mid{ border-style:dashed; }
+  .scale-dot.active{ background:var(--accent-soft); border-color:var(--accent-soft); }
+  @media (max-width:640px){
+    .scale-field-side{ font-size:11px; max-width:26%; }
+    .scale-dot{ width:23px; height:23px; }
+  }
+
+  /* キャラクター設定：好みなど「左右＋どちらも好き／どちらも苦手」で選ぶ項目 */
+  .pref-field{ margin-bottom:16px; }
+  .pref-field-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+  .pref-field-label{ font-size:12.5px; color:var(--ink-soft); font-weight:500; }
+  .pref-field-options{ display:flex; flex-wrap:wrap; gap:6px; }
+  .pref-btn{ padding:6px 10px; font-size:12.5px; border:1px solid var(--line); border-radius:14px; background:var(--card); color:var(--ink); white-space:nowrap; }
+  .pref-btn.active{ background:var(--accent-soft); color:#fff; border-color:var(--accent-soft); }
+  @media (max-width:640px){ .pref-btn{ padding:5px 8px; font-size:12px; } }
+
+  /* キャラクター設定：外見の詳細項目を並べるグリッド */
+  .appearance-detail-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }
+  @media (max-width:640px){ .appearance-detail-grid{ grid-template-columns:1fr; } }
   .loc-tree-row{ display:flex; align-items:center; gap:6px; padding:9px 4px; border-bottom:1px solid var(--line); }
   .loc-tree-row:last-child{ border-bottom:none; }
   .loc-tree-row .twisty{ background:none; border:none; font-size:11px; color:var(--ink-soft); width:16px; flex-shrink:0; }
@@ -1934,6 +1974,23 @@ function migrateData(parsed){
   if(!parsed.characterGroups) parsed.characterGroups = [];
   parsed.characters = parsed.characters.map(c => ({
     groupId: null, tags: [], ...c,
+  }));
+
+  // キャラクター設定UI改修（外見詳細・性格5段階・好み・信仰思想・目的の深掘り）で追加した項目。
+  // 新項目が存在しない旧データでもエラーにならないよう、既定値を先に敷いてから旧データ(c)で上書きする。
+  parsed.characters = parsed.characters.map(c => ({
+    history:'',
+    heightCm:null, weightKg:null, bust:'', waist:'', hip:'', bodyType:'',
+    hairColor:'', hairLength:'', hairStyle:'', eyeColor:'', skinColor:'', outfit:'', appearanceFeatures:'',
+    personalityScale:{}, preferenceScale:{}, beliefScale:{},
+    likesText:'', dislikesText:'', weaknessText:'', fearText:'', obsessionText:'',
+    religionStatus:'', religionDetail:'', believesSupernatural:'', supernaturalDetail:'',
+    goalDetail:{},
+    ...c,
+    personalityScale: { ...(c.personalityScale||{}) },
+    preferenceScale: { ...(c.preferenceScale||{}) },
+    beliefScale: { ...(c.beliefScale||{}) },
+    goalDetail: { ...(c.goalDetail||{}) },
   }));
 
   if(!parsed.worldSettingGroups || parsed.worldSettingGroups.length===0){
@@ -3567,6 +3624,151 @@ function LocationListView({ data, onOpen, onCreate }){
   );
 }
 
+/* ---- キャラクター設定UI改修：選択式で人物像を作るための定義データ ----
+   表現パレット等とは無関係の、キャラクター詳細画面専用の定義。 */
+
+// 性格の5段階対比（中央=3が「どちらでもない」）
+const PERSONALITY_SCALE_DEFS = [
+  { id:'pace', left:'おっとり', right:'せっかち' },
+  { id:'detail', left:'大雑把', right:'几帳面' },
+  { id:'joke', left:'冗談が通じる', right:'冗談が通じない' },
+  { id:'talk', left:'寡黙', right:'おしゃべり' },
+  { id:'social', left:'内向的', right:'社交的' },
+  { id:'risk', left:'慎重', right:'大胆' },
+  { id:'emotion', left:'感情的', right:'冷静' },
+  { id:'honesty', left:'素直', right:'ひねくれている' },
+  { id:'coop', left:'協調的', right:'我が道を行く' },
+];
+
+// 信仰・思想・価値観の5段階対比
+const BELIEF_SCALE_DEFS = [
+  { id:'change', left:'現状維持', right:'改革' },
+  { id:'benefit', left:'個人の幸福', right:'大勢の利益' },
+  { id:'duty', left:'家族', right:'使命' },
+  { id:'lineage', left:'家柄を守る', right:'自分の人生を選ぶ' },
+  { id:'order', left:'秩序', right:'自由' },
+  { id:'process', left:'過程', right:'結果' },
+  { id:'forgive', left:'許す', right:'報復する' },
+  { id:'fate', left:'運命', right:'自己決定' },
+];
+
+// 好みの対比（性格・信仰思想の5段階とは異なり「どちらも好き／どちらも苦手」も選べる）
+const PREFERENCE_PAIR_DEFS = [
+  { id:'taste', left:'甘い物', right:'辛い物' },
+  { id:'climate', left:'暑い場所', right:'寒い場所' },
+  { id:'cuisine', left:'和食', right:'洋食' },
+  { id:'meat', left:'肉', right:'魚' },
+  { id:'place', left:'都会', right:'自然' },
+  { id:'crowd', left:'一人', right:'大人数' },
+  { id:'time', left:'朝', right:'夜' },
+  { id:'stability', left:'安定', right:'刺激' },
+];
+const PREFERENCE_OPTIONS = [
+  { key:'left', text:(l)=>`${l}が好き` },
+  { key:'slightlyLeft', text:(l)=>`やや${l}寄り` },
+  { key:'both', text:()=>'どちらも好き' },
+  { key:'slightlyRight', text:(l,r)=>`やや${r}寄り` },
+  { key:'right', text:(l,r)=>`${r}が好き` },
+  { key:'neitherDislike', text:()=>'どちらも苦手' },
+];
+
+const RELIGION_STATUS_OPTIONS = ['無宗教', '信仰あり', '迷い・不明', 'その他'];
+const SUPERNATURAL_BELIEF_OPTIONS = ['信じる', '信じない', '分からない・迷っている', 'その他'];
+
+// 目的の深掘り質問（既存の「目的」自由記述欄とは別項目として保存する）
+const GOAL_QUESTION_DEFS = [
+  { id:'currentWish', label:'現在望んでいること', hint:'今、心の中で一番強く望んでいることを書きます', placeholder:'例：故郷に帰りたい／認められたい／仇を討ちたい' },
+  { id:'currentActions', label:'そのためにしていること', hint:'目的のために、実際に行動していることを書きます', placeholder:'例：修行をしている／情報を集めている／味方を増やしている' },
+  { id:'ultimateWish', label:'最終的にどうなりたいか', hint:'物語の最後にどんな状態でいたいかを書きます', placeholder:'例：平穏に暮らしたい／頂点に立ちたい／誰かを守れる存在になりたい' },
+  { id:'mustKeep', label:'失いたくないもの', hint:'これを失ったら折れてしまう、というものを書きます', placeholder:'例：家族／誇り／今の居場所' },
+  { id:'obstacle', label:'目的を邪魔しているもの', hint:'目的の達成を妨げている人物・状況・自分自身の弱さなどを書きます', placeholder:'例：自分自身の弱さ／過去のしがらみ／敵対する組織' },
+  { id:'hiddenDesire', label:'本人が自覚していない本当の欲求', hint:'本人は気づいていないが、行動の奥に隠れている欲求を書きます（作者だけが知っていてもよい）', placeholder:'例：本当は誰かに頼りたい／実は復讐よりも安心を求めている' },
+];
+
+// 左右対比を5段階（1〜5、3=どちらでもない、null=未設定）で選ぶ入力。性格・信仰思想の両方で共用する。
+function ScaleField({ label, leftLabel, rightLabel, value, onChange }){
+  return (
+    <div className="scale-field">
+      <div className="scale-field-head">
+        <span className="scale-field-label">{label}</span>
+        {value!=null && <button type="button" className="scale-field-reset" onClick={()=>onChange(null)}>未設定に戻す</button>}
+      </div>
+      <div className="scale-field-row">
+        <span className="scale-field-side">{leftLabel}</span>
+        <div className="scale-field-dots">
+          {[1,2,3,4,5].map(n=>(
+            <button key={n} type="button"
+              className={"scale-dot"+(value===n?" active":"")+(n===3?" mid":"")}
+              title={n===3?'どちらでもない':`${leftLabel}／${rightLabel}のうち${n}`}
+              aria-label={`${leftLabel}〜${rightLabel} ${n}段階目`}
+              onClick={()=>onChange(n)} />
+          ))}
+        </div>
+        <span className="scale-field-side" style={{textAlign:'right'}}>{rightLabel}</span>
+      </div>
+    </div>
+  );
+}
+
+// 好み専用：左右対比＋「どちらも好き」「どちらも苦手」＋未設定を選ぶ入力
+function PreferenceField({ label, leftLabel, rightLabel, value, onChange }){
+  return (
+    <div className="pref-field">
+      <div className="pref-field-head">
+        <span className="pref-field-label">{label || `${leftLabel} ／ ${rightLabel}`}</span>
+        {value!=null && <button type="button" className="scale-field-reset" onClick={()=>onChange(null)}>未設定に戻す</button>}
+      </div>
+      <div className="pref-field-options">
+        {PREFERENCE_OPTIONS.map(opt=>(
+          <button key={opt.key} type="button"
+            className={"pref-btn"+(value===opt.key?" active":"")}
+            onClick={()=>onChange(opt.key)}>
+            {opt.text(leftLabel, rightLabel)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 数値入力とスライダーを連動させる入力（身長・体重など）。
+// 数値欄はmin/maxを持たないため範囲外（人外キャラなど）もそのまま入力できる。
+// スライダーは見た目上clamp(min〜max)した位置を表示するだけで、保存されている数値自体は書き換えない。
+function SliderNumberField({ label, value, onChange, min, max, step, unit, sliderDefault }){
+  const numVal = (value===null || value===undefined || value==='') ? '' : value;
+  const sliderVal = (value===null || value===undefined || value==='') ? sliderDefault : clamp(Number(value), min, max);
+  return (
+    <div className="field-row">
+      <label>{label}</label>
+      <div className="slider-field">
+        <input type="number" inputMode="decimal" className="slider-field-number" value={numVal}
+          placeholder="未設定"
+          onChange={e=>{ const raw=e.target.value; onChange(raw===''?null:Number(raw)); }} />
+        <span className="slider-field-unit">{unit}</span>
+        <input type="range" className="slider-field-range" min={min} max={max} step={step}
+          value={sliderVal}
+          onChange={e=>onChange(Number(e.target.value))} />
+        {value!=null && value!=='' && <button type="button" className="slider-field-reset" onClick={()=>onChange(null)}>未設定に戻す</button>}
+      </div>
+    </div>
+  );
+}
+
+// 宗教・信仰の有無／神や超常的存在を信じるかなど、単純な左右対比にしにくい項目用：選択肢＋自由記述
+function BeliefSelectField({ label, value, onChange, options, detail, onDetailChange, detailPlaceholder }){
+  return (
+    <div className="field-row">
+      <label>{label}</label>
+      <select value={value||''} onChange={e=>onChange(e.target.value)}>
+        <option value="">未設定</option>
+        {options.map(o=><option key={o} value={o}>{o}</option>)}
+      </select>
+      <AutoTextarea style={{marginTop:6, padding:'6px 8px', border:'1px solid var(--line)', borderRadius:6}} minHeight={50}
+        placeholder={detailPlaceholder} value={detail||''} onChange={e=>onDetailChange(e.target.value)} />
+    </div>
+  );
+}
+
 /* ---- キャラクター ---- */
 function CharacterDetail({ data, id, updateItem, deleteItem, onBack, allOrgs, allLocations, allTimeline }){
   const ch = data.characters.find(c=>c.id===id);
@@ -3580,6 +3782,22 @@ function CharacterDetail({ data, id, updateItem, deleteItem, onBack, allOrgs, al
   const addChange = () => patch({ changes: [...(ch.changes||[]), { id: uid('chg'), timeLabel:'', title:'', description:'', timelineEventId:null }] });
   const updateChange = (cid, p) => patch({ changes: (ch.changes||[]).map(c=>c.id===cid?{...c,...p}:c) });
   const removeChange = (cid) => patch({ changes: (ch.changes||[]).filter(c=>c.id!==cid) });
+
+  // キャラクター設定UI改修：選択式グループ（性格・信仰思想・好み・目的の深掘り）の更新ヘルパー。
+  // 各グループはオブジェクトとして持ち、1項目だけをマージ更新する（他の選択済み項目を消さない）。
+  const patchPersonalityScale = (tid, v) => patch({ personalityScale: { ...(ch.personalityScale||{}), [tid]: v } });
+  const patchBeliefScale = (tid, v) => patch({ beliefScale: { ...(ch.beliefScale||{}), [tid]: v } });
+  const patchPreferenceScale = (tid, v) => patch({ preferenceScale: { ...(ch.preferenceScale||{}), [tid]: v } });
+  const patchGoalDetail = (qid, v) => patch({ goalDetail: { ...(ch.goalDetail||{}), [qid]: v } });
+
+  const appearanceDetailCount = ['heightCm','weightKg','bust','waist','hip','bodyType','hairColor','hairLength','hairStyle','eyeColor','skinColor','outfit','appearanceFeatures']
+    .filter(k => ch[k]!==null && ch[k]!==undefined && ch[k]!=='').length;
+  const personalityScaleCount = Object.values(ch.personalityScale||{}).filter(v=>v!=null).length;
+  const preferenceFilledCount = Object.values(ch.preferenceScale||{}).filter(v=>v!=null).length
+    + ['likesText','dislikesText','weaknessText','fearText','obsessionText'].filter(k=>ch[k]).length;
+  const beliefFilledCount = Object.values(ch.beliefScale||{}).filter(v=>v!=null).length
+    + (ch.religionStatus?1:0) + (ch.believesSupernatural?1:0);
+  const goalDetailCount = Object.values(ch.goalDetail||{}).filter(v=>v && String(v).trim()).length;
 
   const iconCandidates = [
     ch.image ? { id: ch.image, label: 'メイン画像' } : null,
@@ -3634,7 +3852,11 @@ function CharacterDetail({ data, id, updateItem, deleteItem, onBack, allOrgs, al
             <button className="btn btn-sm" disabled={iconCandidates.length===0} onClick={()=>setCropOpen(true)}>✂️ 画像から切り抜く</button>
           </div>
         </div>
-        <div className="field-row"><label>概要</label><FieldAutoTextarea value={ch.summary||''} onChange={e=>patch({summary:e.target.value})} minHeight={110} /></div>
+        <div className="field-row">
+          <label>概要</label>
+          <p className="field-hint">ひとことで表すなら？　見た目・性格・立場などを簡潔にまとめます。</p>
+          <FieldAutoTextarea value={ch.summary||''} onChange={e=>patch({summary:e.target.value})} minHeight={110} />
+        </div>
       </CollapsibleSection>
 
       {cropOpen && (
@@ -3643,11 +3865,100 @@ function CharacterDetail({ data, id, updateItem, deleteItem, onBack, allOrgs, al
       )}
 
       <CollapsibleSection title="人物像（現在の状態）" preview={firstNonEmpty(ch.personality, ch.values, ch.appearance)}>
-        <div className="field-row"><label>外見</label><FieldAutoTextarea value={ch.appearance||''} onChange={e=>patch({appearance:e.target.value})} minHeight={130} /></div>
-        <div className="field-row"><label>性格</label><FieldAutoTextarea value={ch.personality||''} onChange={e=>patch({personality:e.target.value})} minHeight={160} /></div>
-        <div className="field-row"><label>思想 / 価値観</label><FieldAutoTextarea value={ch.values||''} onChange={e=>patch({values:e.target.value})} minHeight={160} /></div>
-        <div className="field-row"><label>目的</label><FieldAutoTextarea value={ch.goal||''} onChange={e=>patch({goal:e.target.value})} minHeight={130} /></div>
+        <div className="field-row">
+          <label>外見</label>
+          <p className="field-hint">服装や髪型など、特徴的な外見のポイントを書きます。数値の詳細は下の「外見設定（詳細）」で設定できます。</p>
+          <FieldAutoTextarea value={ch.appearance||''} onChange={e=>patch({appearance:e.target.value})} minHeight={130} />
+        </div>
+        <div className="field-row">
+          <label>性格</label>
+          <p className="field-hint">一言でなく、エピソードや口癖として書くと立体的になります。傾向を数値でも表したい場合は下の「性格（5段階）」で設定できます。</p>
+          <FieldAutoTextarea value={ch.personality||''} onChange={e=>patch({personality:e.target.value})} minHeight={160} />
+        </div>
+        <div className="field-row">
+          <label>思想 / 価値観</label>
+          <p className="field-hint">何を大切にし、何を許せないかを書きます。細かい対比項目は下の「信仰・思想・価値観（詳細）」で設定できます。</p>
+          <FieldAutoTextarea value={ch.values||''} onChange={e=>patch({values:e.target.value})} minHeight={160} />
+        </div>
+        <div className="field-row">
+          <label>目的</label>
+          <p className="field-hint">物語を通して何を求めているかを大まかに書きます。具体的な質問に分けて考えたい場合は下の「目的（深掘り）」で設定できます。</p>
+          <FieldAutoTextarea value={ch.goal||''} onChange={e=>patch({goal:e.target.value})} minHeight={130} />
+        </div>
+        <div className="field-row">
+          <label>過去</label>
+          <p className="field-hint">今の性格や価値観につながった出来事、育った環境などを書きます。時系列で細かく残したい場合は下の「変化・出来事」も使えます。</p>
+          <FieldAutoTextarea value={ch.history||''} onChange={e=>patch({history:e.target.value})} minHeight={130} />
+        </div>
         <div className="field-row"><label>メモ</label><FieldAutoTextarea value={ch.memo||''} onChange={e=>patch({memo:e.target.value})} minHeight={160} /></div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="外見設定（詳細）" badge={appearanceDetailCount || null}>
+        <p className="field-hint" style={{marginTop:0}}>すべて任意入力です。未設定のままでも保存できます。</p>
+        <SliderNumberField label="身長" value={ch.heightCm} onChange={v=>patch({heightCm:v})} min={100} max={220} step={1} unit="cm" sliderDefault={160} />
+        <SliderNumberField label="体重" value={ch.weightKg} onChange={v=>patch({weightKg:v})} min={20} max={150} step={1} unit="kg" sliderDefault={55} />
+        <div className="appearance-detail-grid">
+          <div className="field-row"><label>バスト</label><input type="number" inputMode="decimal" value={ch.bust===null||ch.bust===undefined?'':ch.bust} placeholder="未設定" onChange={e=>patch({bust:e.target.value})} /></div>
+          <div className="field-row"><label>ウエスト</label><input type="number" inputMode="decimal" value={ch.waist===null||ch.waist===undefined?'':ch.waist} placeholder="未設定" onChange={e=>patch({waist:e.target.value})} /></div>
+          <div className="field-row"><label>ヒップ</label><input type="number" inputMode="decimal" value={ch.hip===null||ch.hip===undefined?'':ch.hip} placeholder="未設定" onChange={e=>patch({hip:e.target.value})} /></div>
+          <div className="field-row"><label>体型</label><input type="text" value={ch.bodyType||''} placeholder="細身 / 筋肉質 など" onChange={e=>patch({bodyType:e.target.value})} /></div>
+          <div className="field-row"><label>髪色</label><input type="text" value={ch.hairColor||''} placeholder="黒 / 銀 など" onChange={e=>patch({hairColor:e.target.value})} /></div>
+          <div className="field-row"><label>髪の長さ</label><input type="text" value={ch.hairLength||''} placeholder="ショート / ロング など" onChange={e=>patch({hairLength:e.target.value})} /></div>
+          <div className="field-row"><label>髪型</label><input type="text" value={ch.hairStyle||''} placeholder="ポニーテール など" onChange={e=>patch({hairStyle:e.target.value})} /></div>
+          <div className="field-row"><label>目の色</label><input type="text" value={ch.eyeColor||''} placeholder="茶 / 碧 など" onChange={e=>patch({eyeColor:e.target.value})} /></div>
+          <div className="field-row"><label>肌の色</label><input type="text" value={ch.skinColor||''} placeholder="色白 / 褐色 など" onChange={e=>patch({skinColor:e.target.value})} /></div>
+          <div className="field-row"><label>普段の服装</label><input type="text" value={ch.outfit||''} placeholder="制服 / 私服の傾向など" onChange={e=>patch({outfit:e.target.value})} /></div>
+        </div>
+        <div className="field-row"><label>外見上の特徴</label><FieldAutoTextarea value={ch.appearanceFeatures||''} onChange={e=>patch({appearanceFeatures:e.target.value})} minHeight={70} placeholder="傷跡 / 義手 / 耳が尖っている など" /></div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="性格（5段階）" badge={personalityScaleCount ? `${personalityScaleCount}/${PERSONALITY_SCALE_DEFS.length}` : null}>
+        <p className="field-hint" style={{marginTop:0}}>左右どちらに近いかを5段階で選びます。中央は「どちらでもない」です。未設定のままでも構いません。</p>
+        {PERSONALITY_SCALE_DEFS.map(def=>(
+          <ScaleField key={def.id} label={`${def.left} ／ ${def.right}`} leftLabel={def.left} rightLabel={def.right}
+            value={(ch.personalityScale||{})[def.id] ?? null}
+            onChange={v=>patchPersonalityScale(def.id, v)} />
+        ))}
+      </CollapsibleSection>
+
+      <CollapsibleSection title="好み" badge={preferenceFilledCount || null}>
+        <p className="field-hint" style={{marginTop:0}}>各項目でどちらが好きかを選びます。「どちらも好き」「どちらも苦手」も選べます。</p>
+        {PREFERENCE_PAIR_DEFS.map(def=>(
+          <PreferenceField key={def.id} label={`${def.left} ／ ${def.right}`} leftLabel={def.left} rightLabel={def.right}
+            value={(ch.preferenceScale||{})[def.id] ?? null}
+            onChange={v=>patchPreferenceScale(def.id, v)} />
+        ))}
+        <div className="field-row"><label>好きな物</label><FieldAutoTextarea value={ch.likesText||''} onChange={e=>patch({likesText:e.target.value})} minHeight={60} /></div>
+        <div className="field-row"><label>嫌いな物</label><FieldAutoTextarea value={ch.dislikesText||''} onChange={e=>patch({dislikesText:e.target.value})} minHeight={60} /></div>
+        <div className="field-row"><label>苦手な物</label><FieldAutoTextarea value={ch.weaknessText||''} onChange={e=>patch({weaknessText:e.target.value})} minHeight={60} /></div>
+        <div className="field-row"><label>怖い物</label><FieldAutoTextarea value={ch.fearText||''} onChange={e=>patch({fearText:e.target.value})} minHeight={60} /></div>
+        <div className="field-row"><label>執着している物</label><FieldAutoTextarea value={ch.obsessionText||''} onChange={e=>patch({obsessionText:e.target.value})} minHeight={60} /></div>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="信仰・思想・価値観（詳細）" badge={beliefFilledCount || null}>
+        <p className="field-hint" style={{marginTop:0}}>左右で対比できる項目は5段階で、宗教・信仰に関する項目は選択肢と自由記述で設定します。</p>
+        <BeliefSelectField label="宗教や信仰の有無" value={ch.religionStatus} onChange={v=>patch({religionStatus:v})}
+          options={RELIGION_STATUS_OPTIONS} detail={ch.religionDetail} onDetailChange={v=>patch({religionDetail:v})}
+          detailPlaceholder="具体的な宗教名や信仰のかたちなど（任意）" />
+        <BeliefSelectField label="神や超常的存在を信じるか" value={ch.believesSupernatural} onChange={v=>patch({believesSupernatural:v})}
+          options={SUPERNATURAL_BELIEF_OPTIONS} detail={ch.supernaturalDetail} onDetailChange={v=>patch({supernaturalDetail:v})}
+          detailPlaceholder="信じる・信じない理由など（任意）" />
+        {BELIEF_SCALE_DEFS.map(def=>(
+          <ScaleField key={def.id} label={`${def.left} ／ ${def.right}`} leftLabel={def.left} rightLabel={def.right}
+            value={(ch.beliefScale||{})[def.id] ?? null}
+            onChange={v=>patchBeliefScale(def.id, v)} />
+        ))}
+      </CollapsibleSection>
+
+      <CollapsibleSection title="目的（深掘り）" badge={goalDetailCount ? `${goalDetailCount}/${GOAL_QUESTION_DEFS.length}` : null}>
+        <p className="field-hint" style={{marginTop:0}}>上の「目的」欄に書いた内容を、具体的な質問に分けて掘り下げます。すべて任意です。</p>
+        {GOAL_QUESTION_DEFS.map(def=>(
+          <div className="field-row" key={def.id}>
+            <label>{def.label}</label>
+            <p className="field-hint">{def.hint}</p>
+            <FieldAutoTextarea value={(ch.goalDetail||{})[def.id]||''} onChange={e=>patchGoalDetail(def.id, e.target.value)} minHeight={70} placeholder={def.placeholder} />
+          </div>
+        ))}
       </CollapsibleSection>
 
       <CollapsibleSection title="自由項目" badge={(ch.customFields||[]).length || null}>
@@ -9233,7 +9544,15 @@ function App(){
     ) : (
       <CharacterListView data={data} setData={setData}
         onOpen={setDetailId}
-        onCreate={()=>{ const id = createItem('characters', { name:'新しいキャラクター', realName:'', calledNames:[], kana:'', image:null, iconImageId:null, affiliationOrgIds:[], category:'', groupId:null, tags:[], age:'', summary:'', appearance:'', personality:'', values:'', goal:'', memo:'', customFields:[], images:[], relatedLocationIds:[], changes:[] }); setDetailId(id); }} />
+        onCreate={()=>{ const id = createItem('characters', { name:'新しいキャラクター', realName:'', calledNames:[], kana:'', image:null, iconImageId:null, affiliationOrgIds:[], category:'', groupId:null, tags:[], age:'', summary:'', appearance:'', personality:'', values:'', goal:'', memo:'', customFields:[], images:[], relatedLocationIds:[], changes:[],
+          history:'',
+          heightCm:null, weightKg:null, bust:'', waist:'', hip:'', bodyType:'',
+          hairColor:'', hairLength:'', hairStyle:'', eyeColor:'', skinColor:'', outfit:'', appearanceFeatures:'',
+          personalityScale:{}, preferenceScale:{}, beliefScale:{},
+          likesText:'', dislikesText:'', weaknessText:'', fearText:'', obsessionText:'',
+          religionStatus:'', religionDetail:'', believesSupernatural:'', supernaturalDetail:'',
+          goalDetail:{},
+        }); setDetailId(id); }} />
     );
   } else if(screen==='organizations'){
     body = detailId ? (
