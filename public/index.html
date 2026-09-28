@@ -330,6 +330,19 @@
   .chip-editor-chip button{ background:none; border:none; color:var(--ink-soft); font-size:13px; line-height:1; padding:0 2px; cursor:pointer; }
   .chip-editor-add-row{ display:flex; gap:6px; }
   .chip-editor-add-row input{ flex:1; min-width:0; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font-size:13px; }
+  .chip-editor-chip.selected-chip{ background:var(--accent-soft); color:#fff; }
+  .chip-editor-chip.selected-chip button{ color:#fff; }
+
+  /* 既存タグ一覧（折りたたみピッカー）：キャラクター編集・キャラクター一覧の絞り込みで共通利用 */
+  .tagpicker{ margin-top:8px; }
+  .tagpicker-toggle{ background:none; border:none; padding:6px 2px; font-size:13px; color:var(--ink-soft); display:flex; align-items:center; gap:6px; cursor:pointer; min-height:30px; }
+  .tagpicker-toggle:hover{ color:var(--ink); }
+  .tagpicker-toggle .chev{ font-size:11px; transition:transform .15s; }
+  .tagpicker-list{ display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 2px; }
+  .tagpicker-option{ font-size:13px; padding:7px 12px; min-height:34px; border-radius:999px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
+  .tagpicker-option:hover{ background:var(--paper-dim); }
+  .tagpicker-option.selected{ background:var(--accent-soft); border-color:var(--accent-soft); color:#fff; }
+  .tagpicker-option-count{ opacity:.75; margin-left:4px; font-size:11.5px; }
 
   /* 表現辞典（言い換え・類語の参照パネル。表現パレットとは別のfixed下部ドロワー）
      PCでは幅広の下部パネル、スマホでは全幅ドロワーとして表示。本文を見ながら参照できることを優先し、
@@ -650,7 +663,7 @@
   .group-block{ margin-bottom:16px; }
   .group-head{ display:flex; align-items:center; gap:10px; padding:8px 4px; cursor:pointer; user-select:none; }
   .group-head .chev{ font-size:11px; color:var(--ink-soft); transition:transform .15s; }
-  .tag-filter-row{ display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; }
+  .tag-filter-row{ display:flex; flex-direction:column; gap:4px; margin:10px 0; }
   .section-preview{ font-size:12.5px; color:var(--ink-soft); margin:-4px 0 6px 19px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; }
 
   /* キャラクター設定：入力欄の近くに出す説明・入力例（プレースホルダーが消えても読めるよう常時表示） */
@@ -3487,17 +3500,112 @@ function GroupsManagerModal({ title, groups, onAdd, onRename, onDelete, onMove, 
   );
 }
 
+/* ---- キャラクタータグ共通処理 ----
+   全キャラクターの tags 配列を正本として、タグ名と使用人数を集計する。
+   タグマスターは持たず、常に data.characters から都度導出することで、
+   使われなくなったタグは自然に一覧から消える。 */
+function collectCharacterTagUsage(characters){
+  const counts = new Map();
+  (characters||[]).forEach(c=>{
+    (c.tags||[]).forEach(raw=>{
+      const t = String(raw||'').trim();
+      if(!t) return;
+      counts.set(t, (counts.get(t)||0)+1);
+    });
+  });
+  return Array.from(counts.entries())
+    .map(([tag,count])=>({tag,count}))
+    .sort((a,b)=> b.count-a.count || a.tag.localeCompare(b.tag,'ja'));
+}
+
+// 既存タグ一覧（折りたたみ）：キャラクター編集画面・一覧の絞り込みで共通利用。
+// selected に含まれるタグは選択済みとして色分けし、押すたびに onToggle(tag) を呼ぶ。
+function TagUsagePicker({ tagUsage, selected, onToggle, label }){
+  const [open, setOpen] = useState(false);
+  const selectedSet = new Set(selected||[]);
+  if(!tagUsage || tagUsage.length===0) return null;
+  return (
+    <div className="tagpicker">
+      <button type="button" className="tagpicker-toggle" onClick={()=>setOpen(o=>!o)}>
+        <span className="chev" style={{display:'inline-block', transform: open?'rotate(90deg)':'none'}}>▶</span>
+        {label}（{tagUsage.length}）
+      </button>
+      {open && (
+        <div className="tagpicker-list">
+          {tagUsage.map(({tag,count})=>(
+            <button type="button" key={tag}
+              className={"tagpicker-option"+(selectedSet.has(tag)?" selected":"")}
+              onClick={()=>onToggle(tag)}>
+              {selectedSet.has(tag) ? '✓ ' : ''}{tag}
+              <span className="tagpicker-option-count">{count}人</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// キャラクター編集画面のタグ欄：チップ表示＋新規追加＋既存タグからの流用をまとめたもの。
+// tags は当該キャラクターの ch.tags そのもの（正本）、allCharacters は使用数集計用。
+function CharacterTagEditor({ tags, allCharacters, onChange }){
+  const [draft, setDraft] = useState('');
+  const list = tags || [];
+  const tagUsage = collectCharacterTagUsage(allCharacters);
+
+  const addTag = (raw) => {
+    const v = String(raw||'').trim();
+    if(!v){ setDraft(''); return; }
+    if(!list.includes(v)) onChange([...list, v]);
+    setDraft('');
+  };
+  const removeAt = (idx) => onChange(list.filter((_,i)=>i!==idx));
+  const toggleExisting = (tag) => {
+    if(list.includes(tag)) onChange(list.filter(t=>t!==tag));
+    else onChange([...list, tag]);
+  };
+  const handleKeyDown = (e) => {
+    if(e.key==='Enter' || e.key===','){
+      e.preventDefault();
+      addTag(draft.replace(/,$/,''));
+    }
+  };
+
+  return (
+    <div className="chip-editor">
+      {list.length>0 && (
+        <div className="chip-editor-chips">
+          {list.map((t,i)=>(
+            <span className="chip-editor-chip" key={t+'-'+i}>
+              {t}
+              <button type="button" onClick={()=>removeAt(i)} aria-label={`${t}を解除`}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="chip-editor-add-row">
+        <input type="text" value={draft} placeholder="新しいタグを入力"
+          onChange={e=>setDraft(e.target.value)}
+          onKeyDown={handleKeyDown} />
+        <button type="button" className="btn btn-sm" onClick={()=>addTag(draft)}>追加</button>
+      </div>
+      <TagUsagePicker tagUsage={tagUsage} selected={list} onToggle={toggleExisting} label="既存タグから選ぶ" />
+    </div>
+  );
+}
+
 /* ---- キャラクター（グループ・タグでの整理） ---- */
 function CharacterListView({ data, setData, onOpen, onCreate }){
-  const [filterTag, setFilterTag] = useState('すべて');
+  const [filterTags, setFilterTags] = useState([]);
   const [managingGroups, setManagingGroups] = useState(false);
   const [collapsed, setCollapsed] = useState({});
 
   const groups = [...data.characterGroups].sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0));
-  const allTags = Array.from(new Set(data.characters.flatMap(c=>c.tags||[]))).sort();
+  const tagUsage = collectCharacterTagUsage(data.characters);
 
-  const visibleChars = filterTag==='すべて' ? data.characters : data.characters.filter(c=>(c.tags||[]).includes(filterTag));
+  const visibleChars = filterTags.length===0 ? data.characters : data.characters.filter(c=>(c.tags||[]).some(t=>filterTags.includes(t)));
   const knownGroupIds = new Set(groups.map(g=>g.id));
+  const toggleFilterTag = (tag) => setFilterTags(prev => prev.includes(tag) ? prev.filter(t=>t!==tag) : [...prev, tag]);
 
   const buckets = groups.map(g => ({ group:g, items: visibleChars.filter(c=>c.groupId===g.id) }));
   const unassigned = visibleChars.filter(c => !c.groupId || !knownGroupIds.has(c.groupId));
@@ -3527,12 +3635,20 @@ function CharacterListView({ data, setData, onOpen, onCreate }){
         <button className="btn btn-primary" onClick={onCreate}>＋ 新規追加</button>
       </div>
 
-      {allTags.length>0 && (
+      {tagUsage.length>0 && (
         <div className="tag-filter-row">
-          <button className={"btn btn-sm"+(filterTag==='すべて'?" btn-primary":"")} onClick={()=>setFilterTag('すべて')}>すべて</button>
-          {allTags.map(t=>(
-            <button key={t} className={"btn btn-sm"+(filterTag===t?" btn-primary":"")} onClick={()=>setFilterTag(t)}>{t}</button>
-          ))}
+          {filterTags.length>0 && (
+            <div className="chip-editor-chips">
+              {filterTags.map(t=>(
+                <span className="chip-editor-chip selected-chip" key={t}>
+                  {t}
+                  <button type="button" onClick={()=>toggleFilterTag(t)} aria-label={`${t}の絞り込みを解除`}>×</button>
+                </span>
+              ))}
+              <button type="button" className="btn btn-sm" onClick={()=>setFilterTags([])}>絞り込み解除</button>
+            </div>
+          )}
+          <TagUsagePicker tagUsage={tagUsage} selected={filterTags} onToggle={toggleFilterTag} label="タグで絞り込む" />
         </div>
       )}
 
@@ -3916,12 +4032,8 @@ function CharacterDetail({ data, id, updateItem, deleteItem, onBack, allOrgs, al
           </div>
         </div>
         <div className="field-row">
-          <label>タグ（カンマ区切り・家族 / 故人 / 未登場 など横断分類用）</label>
-          <input type="text" list="char-tag-datalist" value={(ch.tags||[]).join(', ')}
-            onChange={e=>patch({tags:e.target.value.split(',').map(s=>s.trim()).filter(Boolean)})} placeholder="メイン, 家族, 故人 など" />
-          <datalist id="char-tag-datalist">
-            {Array.from(new Set(data.characters.flatMap(c=>c.tags||[]))).map(t=><option key={t} value={t} />)}
-          </datalist>
+          <label>タグ（家族 / 故人 / 未登場 など横断分類用）</label>
+          <CharacterTagEditor tags={ch.tags||[]} allCharacters={data.characters} onChange={v=>patch({tags:v})} />
         </div>
         <div className="field-row">
           <label>なんと呼ばれているか（相手によって複数）</label>
