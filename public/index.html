@@ -3732,12 +3732,14 @@ function sortHeightChars(chars, sortMode){
   return arr;
 }
 
+// 基準人物との差分：本人は呼び出し側で「基準」と表示するため、ここでは差分のみを扱う。
 function formatHeightDiff(diffCm){
-  if(diffCm===0) return '±0cm';
-  return (diffCm>0 ? '＋' : '−') + Math.abs(diffCm) + 'cm';
+  const sign = diffCm===0 ? '±' : (diffCm>0 ? '＋' : '−');
+  return `基準より ${sign}${Math.abs(diffCm)}cm`;
 }
 
-// 長い人物名をSVG内で2行までの目安で折り返す。それでも収まらない場合は末尾を省略する（正確なピクセル計測はしない簡易実装）。
+// 長い人物名をSVG内で2行までの目安で折り返す。それ以外（短い名前）は改行しない。
+// 収まらない場合は2行目の末尾を省略する（正確なピクセル計測はしない簡易実装。文字単位で強制改行はしない＝1行に収まる限りは分割しない）。
 function wrapNameForChart(name, maxCharsPerLine){
   const s = (name && String(name).trim()) || '（名称未設定）';
   if(s.length <= maxCharsPerLine) return [s];
@@ -3749,43 +3751,80 @@ function wrapNameForChart(name, maxCharsPerLine){
   return [line1, line2];
 }
 
-// 頭・胴体・腕・脚が分かる程度の、男女の体型を強く固定しない簡易な人型シルエット。
-// heightPx はそのままその人物の身長（heightCm）に比例した高さで、頭頂部が floorY-heightPx に一致する。
-function HeightSilhouette({ centerX, floorY, heightPx, fill }){
-  const headR = heightPx*0.072;
+// 落ち着いた色を人物ごとに自動で割り当てる（派手な原色は使わない）。表示順のインデックスで巡回する。
+const HEIGHTCMP_PALETTE = [
+  '#5b6089', // 紫がかった青
+  '#4d6f86', // くすんだ青
+  '#8a5049', // くすんだ赤
+  '#4f7a72', // 青緑
+  '#8a6a45', // 茶
+  '#6a6560', // グレー
+  '#705a8a', // 紫
+  '#5a7a58', // くすんだ緑
+];
+
+// 約7〜7.5頭身の細身で中性的なマネキン型シルエット。全員が同一の比率で、heightPxのみで等倍拡大・縮小する。
+// heightPx はその人物の身長（heightCm）に比例した高さで、頭頂部が floorY-heightPx に一致する。
+function HeightSilhouette({ centerX, floorY, heightPx, color }){
   const headTopY = floorY - heightPx;
-  const headCenterY = headTopY + headR;
-  const shoulderY = headTopY + headR*2 + heightPx*0.012;
-  const hipY = shoulderY + heightPx*0.34;
-  const torsoW = Math.max(6, heightPx*0.15);
-  const limbW = Math.max(3, heightPx*0.045);
-  const armSpread = heightPx*0.05;
-  const legSpread = heightPx*0.04;
+  const headH = heightPx*0.135;          // 頭：縦長の楕円（約7.4頭身）
+  const headW = heightPx*0.088;          // 頭幅：全身高さの約8.8%
+  const headCenterY = headTopY + headH/2;
+  const neckH = heightPx*0.022;
+  const shoulderY = headTopY + headH + neckH;
+  const torsoH = heightPx*0.30;
+  const hipY = shoulderY + torsoH;
+  const legH = heightPx - (headH+neckH+torsoH);
+  const shoulderW = heightPx*0.225;      // 肩幅：全身高さの約22.5%
+  const hipW = shoulderW*0.76;           // 腰へ少し細くなる
+  const legGap = heightPx*0.05;          // 左右の脚を分ける間隔
+  const thighW = heightPx*0.052;
+  const ankleW = heightPx*0.032;
+  const armTopW = heightPx*0.034;
+  const armBottomW = heightPx*0.02;
+  const armGap = heightPx*0.016;         // 胴体から少し離す
+
+  const trapezoid = (topCx, topY, topW, botCx, botY, botW) => [
+    [topCx-topW/2, topY], [topCx+topW/2, topY], [botCx+botW/2, botY], [botCx-botW/2, botY]
+  ].map(p=>p.join(',')).join(' ');
+
+  const leftLegCx = centerX-legGap, rightLegCx = centerX+legGap;
+  const armWristY = hipY - torsoH*0.08;
+  const leftShoulderX = centerX-shoulderW/2-armGap, leftWristX = leftShoulderX-heightPx*0.008;
+  const rightShoulderX = centerX+shoulderW/2+armGap, rightWristX = rightShoulderX+heightPx*0.008;
+
   return (
     <g>
-      <line x1={centerX-legSpread} y1={hipY-2} x2={centerX-legSpread} y2={floorY} stroke={fill} strokeWidth={limbW} strokeLinecap="round" />
-      <line x1={centerX+legSpread} y1={hipY-2} x2={centerX+legSpread} y2={floorY} stroke={fill} strokeWidth={limbW} strokeLinecap="round" />
-      <line x1={centerX-torsoW/2} y1={shoulderY+2} x2={centerX-torsoW/2-armSpread} y2={hipY} stroke={fill} strokeWidth={limbW} strokeLinecap="round" />
-      <line x1={centerX+torsoW/2} y1={shoulderY+2} x2={centerX+torsoW/2+armSpread} y2={hipY} stroke={fill} strokeWidth={limbW} strokeLinecap="round" />
-      <rect x={centerX-torsoW/2} y={shoulderY} width={torsoW} height={Math.max(2,hipY-shoulderY)} rx={torsoW*0.3} fill={fill} />
-      <circle cx={centerX} cy={headCenterY} r={headR} fill={fill} />
+      {/* 脚（腰元→足元、足元へ向かって少し細くする） */}
+      <polygon points={trapezoid(leftLegCx, hipY, thighW, leftLegCx, floorY, ankleW)} fill={color} />
+      <polygon points={trapezoid(rightLegCx, hipY, thighW, rightLegCx, floorY, ankleW)} fill={color} />
+      {/* 腕（肩→手首、胴体から少し離し、手首へ向かって細くする） */}
+      <polygon points={trapezoid(leftShoulderX, shoulderY+torsoH*0.03, armTopW, leftWristX, armWristY, armBottomW)} fill={color} />
+      <polygon points={trapezoid(rightShoulderX, shoulderY+torsoH*0.03, armTopW, rightWristX, armWristY, armBottomW)} fill={color} />
+      {/* 胴体（肩→腰、少しなだらかに細くなる） */}
+      <polygon points={trapezoid(centerX, shoulderY, shoulderW, centerX, hipY, hipW)} fill={color} />
+      {/* 短い首 */}
+      <rect x={centerX-headW*0.28} y={headTopY+headH-1} width={headW*0.56} height={neckH+2} fill={color} />
+      {/* 頭（縦長の楕円） */}
+      <ellipse cx={centerX} cy={headCenterY} rx={headW/2} ry={headH/2} fill={color} />
     </g>
   );
 }
 
-const HEIGHTCMP_CHART_PX = 340;   // 床から表示上限cmまでの縦ピクセル数（cm範囲に応じて自動縮尺）
-const HEIGHTCMP_TOP_PAD = 20;     // 目盛り最上部の数値が切れないための余白
-const HEIGHTCMP_LABEL_AREA = 76;  // 床線より下の名前・身長・差分の表示領域
-const HEIGHTCMP_COL_W = 104;      // 一人あたりの表示幅
-const HEIGHTCMP_AXIS_W = 50;      // 左側の目盛り軸の幅
-const HEIGHTCMP_SIDE_PAD = 14;    // 人物列の左右余白
-const HEIGHTCMP_FIGURE_FILL = '#6b665d';
-const HEIGHTCMP_BASELINE_FILL = '#3b3f5c';
-const HEIGHTCMP_BASELINE_BG = 'rgba(59,63,92,0.09)';
-const HEIGHTCMP_GRID_COLOR = '#ddd5c3';
-const HEIGHTCMP_FLOOR_COLOR = '#2c2a28';
+const HEIGHTCMP_CHART_PX = 300;    // 床から表示上限cmまでの縦ピクセル数（cm範囲に応じて自動縮尺）
+const HEIGHTCMP_TOP_PAD = 34;      // 頭上の身長表示ぶんの余白（最上部の人物でも数値が切れない高さ）
+const HEIGHTCMP_BOTTOM_PAD = 62;   // 足元の名前（最大2行）＋差分ぶんの余白
+const HEIGHTCMP_COL_W = 110;       // 一人あたりの表示幅（90〜110pxの目安の上限）
+const HEIGHTCMP_AXIS_W = 54;       // 左側の目盛り軸の幅
+const HEIGHTCMP_SIDE_PAD = 44;     // 目盛り領域とは別に確保する、先頭・末尾人物の左右余白（40px以上）
+const HEIGHTCMP_MAJOR_STEP = 50;   // 数値付きの主要目盛り
+const HEIGHTCMP_MINOR_STEP = 10;   // 数値なしの薄い補助目盛り
+const HEIGHTCMP_GRID_MAJOR = 'rgba(44,42,40,0.20)';
+const HEIGHTCMP_GRID_MINOR = 'rgba(44,42,40,0.10)';
+const HEIGHTCMP_FLOOR_COLOR = '#3a362f';
 const HEIGHTCMP_TEXT_COLOR = '#2c2a28';
 const HEIGHTCMP_SUBTEXT_COLOR = '#6b665d';
+const HEIGHTCMP_BASELINE_MARK = '#2c2a28';
 
 function HeightCompareView({ data, onBack }){
   const validChars = useMemo(()=>collectValidHeightChars(data.characters), [data.characters]);
@@ -3834,19 +3873,22 @@ function HeightCompareView({ data, onBack }){
 
   const baselineChar = baselineId ? displayChars.find(c=>c.id===baselineId) : null;
 
-  // 表示上限cm：最大身長を10cm単位で切り上げ＋少し余白、最低200cmは確保する
+  // 表示上限cm：最大身長を50cm単位で切り上げ（+αの余白を含む）、最低200cmは確保する
   const maxH = displayChars.length ? Math.max(...displayChars.map(c=>c.heightCm)) : 0;
-  const topCm = Math.max(Math.ceil((maxH + 10) / 10) * 10, 200);
+  const topCm = Math.max(Math.ceil((maxH + 15) / HEIGHTCMP_MAJOR_STEP) * HEIGHTCMP_MAJOR_STEP, 200);
   const pxPerCm = HEIGHTCMP_CHART_PX / topCm;
   const floorY = HEIGHTCMP_TOP_PAD + HEIGHTCMP_CHART_PX;
-  const svgH = floorY + HEIGHTCMP_LABEL_AREA;
+  const svgH = floorY + HEIGHTCMP_BOTTOM_PAD;
   const cmToY = (cm) => floorY - cm*pxPerCm;
 
-  const ticks = [];
-  for(let t=0; t<=topCm; t+=10) ticks.push(t);
+  const majorTicks = [];
+  for(let t=0; t<=topCm; t+=HEIGHTCMP_MAJOR_STEP) majorTicks.push(t);
+  const minorTicks = [];
+  for(let t=0; t<=topCm; t+=HEIGHTCMP_MINOR_STEP){ if(t % HEIGHTCMP_MAJOR_STEP !== 0) minorTicks.push(t); }
 
   const figuresW = HEIGHTCMP_SIDE_PAD*2 + HEIGHTCMP_COL_W*Math.max(displayChars.length,1);
-  const maxCharsPerLine = Math.max(4, Math.floor((HEIGHTCMP_COL_W-8)/11));
+  // 1文字あたりの目安幅を余裕を持って見積もり、短い名前は改行させず長い名前だけ2行に折り返す
+  const maxCharsPerLine = Math.max(5, Math.floor((HEIGHTCMP_COL_W-14)/12));
 
   const axisSvgRef = useRef(null);
   const figuresSvgRef = useRef(null);
@@ -3942,51 +3984,60 @@ function HeightCompareView({ data, onBack }){
                 <div className="heightcmp-baseline-label">基準人物：{baselineChar.name || '（名称未設定）'}　{baselineChar.heightCm}cm</div>
               )}
               <div className="heightcmp-chart-wrap">
-                <svg ref={axisSvgRef} className="heightcmp-axis-svg" width={HEIGHTCMP_AXIS_W} height={svgH}>
-                  <text x={HEIGHTCMP_AXIS_W-6} y={12} textAnchor="end" fontSize="10" fill={HEIGHTCMP_SUBTEXT_COLOR}>cm</text>
-                  {ticks.map(t=>(
-                    <g key={t}>
-                      <line x1={HEIGHTCMP_AXIS_W-6} y1={cmToY(t)} x2={HEIGHTCMP_AXIS_W} y2={cmToY(t)} stroke={HEIGHTCMP_GRID_COLOR} strokeWidth="1" />
-                      <text x={HEIGHTCMP_AXIS_W-10} y={cmToY(t)+3} textAnchor="end" fontSize="10" fill={HEIGHTCMP_SUBTEXT_COLOR}>{t}</text>
-                    </g>
+                <svg ref={axisSvgRef} className="heightcmp-axis-svg" width={HEIGHTCMP_AXIS_W} height={svgH}
+                  viewBox={`0 0 ${HEIGHTCMP_AXIS_W} ${svgH}`} style={{writingMode:'horizontal-tb'}}>
+                  <text x={HEIGHTCMP_AXIS_W-8} y={HEIGHTCMP_TOP_PAD-18} textAnchor="end" fontSize="10.5" fill={HEIGHTCMP_SUBTEXT_COLOR}>cm</text>
+                  {majorTicks.map(t=>(
+                    <text key={t} x={HEIGHTCMP_AXIS_W-10} y={cmToY(t)+4} textAnchor="end" fontSize="11" fontWeight="600" fill={HEIGHTCMP_SUBTEXT_COLOR}>{t}</text>
                   ))}
                 </svg>
                 <div className="heightcmp-scroll">
-                  <svg ref={figuresSvgRef} className="heightcmp-figures-svg" width={figuresW} height={svgH}>
-                    {ticks.map(t=>(
+                  <svg ref={figuresSvgRef} className="heightcmp-figures-svg" width={figuresW} height={svgH}
+                    viewBox={`0 0 ${figuresW} ${svgH}`} style={{writingMode:'horizontal-tb'}}>
+                    {/* 10cm刻みの薄い補助線（数値なし） */}
+                    {minorTicks.map(t=>(
+                      <line key={'mi'+t} x1="0" y1={cmToY(t)} x2={figuresW} y2={cmToY(t)} stroke={HEIGHTCMP_GRID_MINOR} strokeWidth="1" strokeDasharray="2,4" />
+                    ))}
+                    {/* 50cm刻みの主要目盛り線 */}
+                    {majorTicks.map(t=>(
                       t===0 ? null : (
-                        <line key={t} x1="0" y1={cmToY(t)} x2={figuresW} y2={cmToY(t)} stroke={HEIGHTCMP_GRID_COLOR} strokeWidth="1" strokeDasharray="3,3" />
+                        <line key={'ma'+t} x1="0" y1={cmToY(t)} x2={figuresW} y2={cmToY(t)} stroke={HEIGHTCMP_GRID_MAJOR} strokeWidth="1" />
                       )
                     ))}
                     {baselineChar && (
                       <line x1="0" y1={cmToY(baselineChar.heightCm)} x2={figuresW} y2={cmToY(baselineChar.heightCm)}
-                        stroke={HEIGHTCMP_BASELINE_FILL} strokeWidth="1.5" strokeDasharray="6,4" />
+                        stroke={HEIGHTCMP_BASELINE_MARK} strokeWidth="1" strokeDasharray="5,4" opacity="0.55" />
                     )}
-                    <line x1="0" y1={floorY} x2={figuresW} y2={floorY} stroke={HEIGHTCMP_FLOOR_COLOR} strokeWidth="2" />
+                    <line x1="0" y1={floorY} x2={figuresW} y2={floorY} stroke={HEIGHTCMP_FLOOR_COLOR} strokeWidth="1.75" />
 
                     {displayChars.map((c, i)=>{
                       const centerX = HEIGHTCMP_SIDE_PAD + i*HEIGHTCMP_COL_W + HEIGHTCMP_COL_W/2;
                       const isBaseline = c.id===baselineId;
+                      const color = HEIGHTCMP_PALETTE[i % HEIGHTCMP_PALETTE.length];
                       const heightPx = c.heightCm*pxPerCm;
+                      const headTopY = floorY - heightPx;
                       const nameLines = wrapNameForChart(c.name, maxCharsPerLine);
                       const diff = baselineChar ? (c.heightCm - baselineChar.heightCm) : null;
-                      let labelY = floorY + 16;
+                      const nameY = floorY + 20;
+                      const diffY = nameY + nameLines.length*15 + 4;
                       return (
                         <g key={c.id}>
                           <title>{c.name || '（名称未設定）'}（{c.heightCm}cm）</title>
                           {isBaseline && (
-                            <rect x={HEIGHTCMP_SIDE_PAD + i*HEIGHTCMP_COL_W} y={HEIGHTCMP_TOP_PAD-6}
-                              width={HEIGHTCMP_COL_W} height={svgH-HEIGHTCMP_TOP_PAD+6}
-                              fill={HEIGHTCMP_BASELINE_BG} stroke={HEIGHTCMP_BASELINE_FILL} strokeWidth="1" rx="6" />
+                            <rect x={HEIGHTCMP_SIDE_PAD + i*HEIGHTCMP_COL_W + 4} y={HEIGHTCMP_TOP_PAD-24}
+                              width={HEIGHTCMP_COL_W-8} height={svgH-(HEIGHTCMP_TOP_PAD-24)-6}
+                              fill="none" stroke={color} strokeWidth="1.25" strokeDasharray="3,3" rx="8" opacity="0.8" />
                           )}
-                          <HeightSilhouette centerX={centerX} floorY={floorY} heightPx={heightPx}
-                            fill={isBaseline ? HEIGHTCMP_BASELINE_FILL : HEIGHTCMP_FIGURE_FILL} />
+                          {/* 頭上：身長 */}
+                          <text x={centerX} y={headTopY-10} textAnchor="middle" fontSize="12" fontWeight="700" fill={HEIGHTCMP_TEXT_COLOR}>{c.heightCm}cm</text>
+                          <HeightSilhouette centerX={centerX} floorY={floorY} heightPx={heightPx} color={color} />
+                          {/* 足元：人物名 */}
                           {nameLines.map((line, li)=>(
-                            <text key={li} x={centerX} y={labelY + li*13} textAnchor="middle" fontSize="11" fontWeight={isBaseline?"700":"400"} fill={HEIGHTCMP_TEXT_COLOR}>{line}</text>
+                            <text key={li} x={centerX} y={nameY + li*15} textAnchor="middle" fontSize="11.5" fontWeight={isBaseline?"700":"500"} fill={HEIGHTCMP_TEXT_COLOR}>{line}</text>
                           ))}
-                          <text x={centerX} y={labelY + nameLines.length*13 + 12} textAnchor="middle" fontSize="11" fontWeight="700" fill={HEIGHTCMP_TEXT_COLOR}>{c.heightCm}cm</text>
+                          {/* 足元：基準人物との差分（基準人物本人は「基準」とだけ表示） */}
                           {baselineChar && (
-                            <text x={centerX} y={labelY + nameLines.length*13 + 27} textAnchor="middle" fontSize="10.5" fill={isBaseline ? HEIGHTCMP_BASELINE_FILL : HEIGHTCMP_SUBTEXT_COLOR}>
+                            <text x={centerX} y={diffY} textAnchor="middle" fontSize="10.5" fontWeight={isBaseline?"700":"400"} fill={isBaseline?color:HEIGHTCMP_SUBTEXT_COLOR}>
                               {isBaseline ? '基準' : formatHeightDiff(diff)}
                             </text>
                           )}
