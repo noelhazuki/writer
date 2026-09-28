@@ -344,6 +344,19 @@
   .tagpicker-option.selected{ background:var(--accent-soft); border-color:var(--accent-soft); color:#fff; }
   .tagpicker-option-count{ opacity:.75; margin-left:4px; font-size:11.5px; }
 
+  /* 人物身長比較表 */
+  .heightcmp-select-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .heightcmp-select-count{ font-size:12.5px; color:var(--ink-soft); }
+  .heightcmp-control-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; }
+  .heightcmp-control-label{ font-size:12.5px; color:var(--ink-soft); flex:0 0 auto; }
+  .heightcmp-btn-group{ display:flex; gap:6px; flex-wrap:wrap; }
+  .heightcmp-chart-card{ margin-top:14px; }
+  .heightcmp-baseline-label{ font-size:13px; color:var(--accent); font-weight:700; margin-bottom:8px; }
+  .heightcmp-chart-wrap{ display:flex; align-items:flex-start; }
+  .heightcmp-axis-svg{ flex:0 0 auto; display:block; }
+  .heightcmp-scroll{ flex:1 1 auto; min-width:0; overflow-x:auto; }
+  .heightcmp-figures-svg{ display:block; }
+
   /* 表現辞典（言い換え・類語の参照パネル。表現パレットとは別のfixed下部ドロワー）
      PCでは幅広の下部パネル、スマホでは全幅ドロワーとして表示。本文を見ながら参照できることを優先し、
      表現パレットと同じ「常にposition:fixedで画面内に出す」構成・bottom位置計算を共有する。 */
@@ -3595,7 +3608,7 @@ function CharacterTagEditor({ tags, allCharacters, onChange }){
 }
 
 /* ---- キャラクター（グループ・タグでの整理） ---- */
-function CharacterListView({ data, setData, onOpen, onCreate }){
+function CharacterListView({ data, setData, onOpen, onCreate, onOpenHeightCompare }){
   const [filterTags, setFilterTags] = useState([]);
   const [managingGroups, setManagingGroups] = useState(false);
   const [collapsed, setCollapsed] = useState({});
@@ -3631,6 +3644,7 @@ function CharacterListView({ data, setData, onOpen, onCreate }){
       <div className="toolbar">
         <h1>🧑 キャラクター</h1>
         <div className="filler" />
+        <button className="btn btn-sm" onClick={onOpenHeightCompare}>身長比較</button>
         <button className="btn btn-sm" onClick={()=>setManagingGroups(true)}>グループを管理</button>
         <button className="btn btn-primary" onClick={onCreate}>＋ 新規追加</button>
       </div>
@@ -3689,6 +3703,302 @@ function CharacterListView({ data, setData, onOpen, onCreate }){
           onAdd={addGroup} onRename={renameGroup} onDelete={deleteGroup} onMove={moveGroup}
           onClose={()=>setManagingGroups(false)}
           deleteHint="グループを削除しても、中のキャラクター自体は削除されません（未分類になります）。" />
+      )}
+    </div>
+  );
+}
+
+/* ---- 人物身長比較表 ----
+   身長データの正本は characters[].heightCm のみ。比較表専用のマスターや複製は持たず、
+   選択状態・並び順・基準人物は画面内の一時的なUI状態としてこのコンポーネント内に閉じる。 */
+
+// heightCm が「有効な正の数値」として扱えるキャラクターだけを抽出する（0以下・NaN・未設定は除外）。
+// __order は元の登録順（data.characters内の並び順）を保持し、「登録順」表示や同身長時の並びに使う。
+function collectValidHeightChars(characters){
+  return (characters||[])
+    .map((c, idx) => ({ c, idx }))
+    .filter(({c}) => {
+      const n = typeof c.heightCm === 'number' ? c.heightCm : parseFloat(c.heightCm);
+      return Number.isFinite(n) && n > 0;
+    })
+    .map(({c, idx}) => ({ id:c.id, name:c.name, heightCm: Number(c.heightCm), __order: idx }));
+}
+
+function sortHeightChars(chars, sortMode){
+  const arr = [...chars];
+  if(sortMode==='asc') arr.sort((a,b)=> (a.heightCm-b.heightCm) || (a.__order-b.__order));
+  else if(sortMode==='desc') arr.sort((a,b)=> (b.heightCm-a.heightCm) || (a.__order-b.__order));
+  else arr.sort((a,b)=> a.__order-b.__order);
+  return arr;
+}
+
+function formatHeightDiff(diffCm){
+  if(diffCm===0) return '±0cm';
+  return (diffCm>0 ? '＋' : '−') + Math.abs(diffCm) + 'cm';
+}
+
+// 長い人物名をSVG内で2行までの目安で折り返す。それでも収まらない場合は末尾を省略する（正確なピクセル計測はしない簡易実装）。
+function wrapNameForChart(name, maxCharsPerLine){
+  const s = (name && String(name).trim()) || '（名称未設定）';
+  if(s.length <= maxCharsPerLine) return [s];
+  const line1 = s.slice(0, maxCharsPerLine);
+  let line2 = s.slice(maxCharsPerLine);
+  if(line2.length > maxCharsPerLine){
+    line2 = line2.slice(0, Math.max(0, maxCharsPerLine-1)) + '…';
+  }
+  return [line1, line2];
+}
+
+// 頭・胴体・腕・脚が分かる程度の、男女の体型を強く固定しない簡易な人型シルエット。
+// heightPx はそのままその人物の身長（heightCm）に比例した高さで、頭頂部が floorY-heightPx に一致する。
+function HeightSilhouette({ centerX, floorY, heightPx, fill }){
+  const headR = heightPx*0.072;
+  const headTopY = floorY - heightPx;
+  const headCenterY = headTopY + headR;
+  const shoulderY = headTopY + headR*2 + heightPx*0.012;
+  const hipY = shoulderY + heightPx*0.34;
+  const torsoW = Math.max(6, heightPx*0.15);
+  const limbW = Math.max(3, heightPx*0.045);
+  const armSpread = heightPx*0.05;
+  const legSpread = heightPx*0.04;
+  return (
+    <g>
+      <line x1={centerX-legSpread} y1={hipY-2} x2={centerX-legSpread} y2={floorY} stroke={fill} strokeWidth={limbW} strokeLinecap="round" />
+      <line x1={centerX+legSpread} y1={hipY-2} x2={centerX+legSpread} y2={floorY} stroke={fill} strokeWidth={limbW} strokeLinecap="round" />
+      <line x1={centerX-torsoW/2} y1={shoulderY+2} x2={centerX-torsoW/2-armSpread} y2={hipY} stroke={fill} strokeWidth={limbW} strokeLinecap="round" />
+      <line x1={centerX+torsoW/2} y1={shoulderY+2} x2={centerX+torsoW/2+armSpread} y2={hipY} stroke={fill} strokeWidth={limbW} strokeLinecap="round" />
+      <rect x={centerX-torsoW/2} y={shoulderY} width={torsoW} height={Math.max(2,hipY-shoulderY)} rx={torsoW*0.3} fill={fill} />
+      <circle cx={centerX} cy={headCenterY} r={headR} fill={fill} />
+    </g>
+  );
+}
+
+const HEIGHTCMP_CHART_PX = 340;   // 床から表示上限cmまでの縦ピクセル数（cm範囲に応じて自動縮尺）
+const HEIGHTCMP_TOP_PAD = 20;     // 目盛り最上部の数値が切れないための余白
+const HEIGHTCMP_LABEL_AREA = 76;  // 床線より下の名前・身長・差分の表示領域
+const HEIGHTCMP_COL_W = 104;      // 一人あたりの表示幅
+const HEIGHTCMP_AXIS_W = 50;      // 左側の目盛り軸の幅
+const HEIGHTCMP_SIDE_PAD = 14;    // 人物列の左右余白
+const HEIGHTCMP_FIGURE_FILL = '#6b665d';
+const HEIGHTCMP_BASELINE_FILL = '#3b3f5c';
+const HEIGHTCMP_BASELINE_BG = 'rgba(59,63,92,0.09)';
+const HEIGHTCMP_GRID_COLOR = '#ddd5c3';
+const HEIGHTCMP_FLOOR_COLOR = '#2c2a28';
+const HEIGHTCMP_TEXT_COLOR = '#2c2a28';
+const HEIGHTCMP_SUBTEXT_COLOR = '#6b665d';
+
+function HeightCompareView({ data, onBack }){
+  const validChars = useMemo(()=>collectValidHeightChars(data.characters), [data.characters]);
+  const validIds = useMemo(()=>new Set(validChars.map(c=>c.id)), [validChars]);
+
+  const [selectedIds, setSelectedIds] = useState(()=>new Set(validChars.map(c=>c.id)));
+  const [sortMode, setSortMode] = useState('asc'); // 'registered' | 'asc' | 'desc'
+  const [baselineId, setBaselineId] = useState('');
+  const initRef = useRef(false);
+
+  // 初回のみ：身長登録済みの人物をすべて選択状態にする
+  useEffect(()=>{
+    if(!initRef.current && validChars.length>0){
+      initRef.current = true;
+      setSelectedIds(new Set(validChars.map(c=>c.id)));
+    }
+  }, [validChars]);
+
+  // 身長が未登録になった・削除されたキャラクターは選択状態から自然に外す
+  useEffect(()=>{
+    setSelectedIds(prev => {
+      const next = new Set([...prev].filter(id=>validIds.has(id)));
+      return next.size===prev.size ? prev : next;
+    });
+  }, [validIds]);
+
+  const toggleSelect = (id) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if(next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const selectAll = () => setSelectedIds(new Set(validChars.map(c=>c.id)));
+  const selectNone = () => setSelectedIds(new Set());
+
+  const displayChars = useMemo(()=>{
+    const selected = validChars.filter(c=>selectedIds.has(c.id));
+    return sortHeightChars(selected, sortMode);
+  }, [validChars, selectedIds, sortMode]);
+
+  const displayIds = useMemo(()=>new Set(displayChars.map(c=>c.id)), [displayChars]);
+
+  // 基準人物が比較対象から外れたら「基準なし」へ戻す
+  useEffect(()=>{
+    if(baselineId && !displayIds.has(baselineId)) setBaselineId('');
+  }, [baselineId, displayIds]);
+
+  const baselineChar = baselineId ? displayChars.find(c=>c.id===baselineId) : null;
+
+  // 表示上限cm：最大身長を10cm単位で切り上げ＋少し余白、最低200cmは確保する
+  const maxH = displayChars.length ? Math.max(...displayChars.map(c=>c.heightCm)) : 0;
+  const topCm = Math.max(Math.ceil((maxH + 10) / 10) * 10, 200);
+  const pxPerCm = HEIGHTCMP_CHART_PX / topCm;
+  const floorY = HEIGHTCMP_TOP_PAD + HEIGHTCMP_CHART_PX;
+  const svgH = floorY + HEIGHTCMP_LABEL_AREA;
+  const cmToY = (cm) => floorY - cm*pxPerCm;
+
+  const ticks = [];
+  for(let t=0; t<=topCm; t+=10) ticks.push(t);
+
+  const figuresW = HEIGHTCMP_SIDE_PAD*2 + HEIGHTCMP_COL_W*Math.max(displayChars.length,1);
+  const maxCharsPerLine = Math.max(4, Math.floor((HEIGHTCMP_COL_W-8)/11));
+
+  const axisSvgRef = useRef(null);
+  const figuresSvgRef = useRef(null);
+
+  const handleSaveSvg = () => {
+    if(!axisSvgRef.current || !figuresSvgRef.current || displayChars.length===0) return;
+    const axisNode = axisSvgRef.current;
+    const figNode = figuresSvgRef.current;
+    const axisW = HEIGHTCMP_AXIS_W;
+    const figW = figuresW;
+    const combined = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    combined.setAttribute('xmlns','http://www.w3.org/2000/svg');
+    combined.setAttribute('width', String(axisW+figW));
+    combined.setAttribute('height', String(svgH));
+    combined.setAttribute('viewBox', `0 0 ${axisW+figW} ${svgH}`);
+    const bg = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    bg.setAttribute('x','0'); bg.setAttribute('y','0');
+    bg.setAttribute('width', String(axisW+figW)); bg.setAttribute('height', String(svgH));
+    bg.setAttribute('fill', '#fbf9f4');
+    combined.appendChild(bg);
+    const axisClone = axisNode.cloneNode(true);
+    while(axisClone.firstChild){ combined.appendChild(axisClone.firstChild); }
+    const figGroup = document.createElementNS('http://www.w3.org/2000/svg','g');
+    figGroup.setAttribute('transform', `translate(${axisW},0)`);
+    const figClone = figNode.cloneNode(true);
+    while(figClone.firstChild){ figGroup.appendChild(figClone.firstChild); }
+    combined.appendChild(figGroup);
+    let svgStr = new XMLSerializer().serializeToString(combined);
+    if(!/^<\?xml/.test(svgStr)) svgStr = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgStr;
+    const blob = new Blob([svgStr], { type:'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'キャラクター身長比較.svg';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div>
+      <div className="breadcrumb"><button onClick={onBack}>← キャラクター一覧へ戻る</button></div>
+      <div className="toolbar">
+        <h1>📏 身長比較</h1>
+        <div className="filler" />
+        <button className="btn btn-sm" onClick={handleSaveSvg} disabled={displayChars.length===0}>SVGで保存</button>
+      </div>
+
+      {validChars.length===0 ? (
+        <div className="empty-hint">身長が登録されているキャラクターがいません。キャラクター設定の「外見設定（詳細）」から身長を登録してください。</div>
+      ) : (
+        <>
+          <CollapsibleSection title="比較設定" defaultOpen badge={`${selectedIds.size}人選択中`}>
+            <div className="heightcmp-select-head">
+              <button type="button" className="btn btn-sm" onClick={selectAll}>すべて選択</button>
+              <button type="button" className="btn btn-sm" onClick={selectNone}>すべて解除</button>
+              <span className="heightcmp-select-count">選択人数：{selectedIds.size}人 / {validChars.length}人</span>
+            </div>
+            <div className="tagpicker-list" style={{marginTop:8}}>
+              {validChars.map(c=>(
+                <button type="button" key={c.id}
+                  className={"tagpicker-option"+(selectedIds.has(c.id)?" selected":"")}
+                  onClick={()=>toggleSelect(c.id)}>
+                  {selectedIds.has(c.id) ? '✓ ' : ''}{c.name || '（名称未設定）'}
+                  <span className="tagpicker-option-count">{c.heightCm}cm</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="heightcmp-control-row">
+              <span className="heightcmp-control-label">並び順</span>
+              <div className="heightcmp-btn-group">
+                <button type="button" className={"btn btn-sm"+(sortMode==='registered'?" active":"")} onClick={()=>setSortMode('registered')}>登録順</button>
+                <button type="button" className={"btn btn-sm"+(sortMode==='asc'?" active":"")} onClick={()=>setSortMode('asc')}>低い順</button>
+                <button type="button" className={"btn btn-sm"+(sortMode==='desc'?" active":"")} onClick={()=>setSortMode('desc')}>高い順</button>
+              </div>
+            </div>
+
+            <div className="heightcmp-control-row">
+              <span className="heightcmp-control-label">基準人物</span>
+              <select value={baselineId} onChange={e=>setBaselineId(e.target.value)} style={{maxWidth:220}}>
+                <option value="">基準なし</option>
+                {displayChars.map(c=>(
+                  <option key={c.id} value={c.id}>{c.name || '（名称未設定）'}　{c.heightCm}cm</option>
+                ))}
+              </select>
+            </div>
+          </CollapsibleSection>
+
+          {displayChars.length===0 ? (
+            <div className="empty-hint">比較する人物が選択されていません。上の一覧からチップを選んでください。</div>
+          ) : (
+            <div className="card card-pad heightcmp-chart-card">
+              {baselineChar && (
+                <div className="heightcmp-baseline-label">基準人物：{baselineChar.name || '（名称未設定）'}　{baselineChar.heightCm}cm</div>
+              )}
+              <div className="heightcmp-chart-wrap">
+                <svg ref={axisSvgRef} className="heightcmp-axis-svg" width={HEIGHTCMP_AXIS_W} height={svgH}>
+                  <text x={HEIGHTCMP_AXIS_W-6} y={12} textAnchor="end" fontSize="10" fill={HEIGHTCMP_SUBTEXT_COLOR}>cm</text>
+                  {ticks.map(t=>(
+                    <g key={t}>
+                      <line x1={HEIGHTCMP_AXIS_W-6} y1={cmToY(t)} x2={HEIGHTCMP_AXIS_W} y2={cmToY(t)} stroke={HEIGHTCMP_GRID_COLOR} strokeWidth="1" />
+                      <text x={HEIGHTCMP_AXIS_W-10} y={cmToY(t)+3} textAnchor="end" fontSize="10" fill={HEIGHTCMP_SUBTEXT_COLOR}>{t}</text>
+                    </g>
+                  ))}
+                </svg>
+                <div className="heightcmp-scroll">
+                  <svg ref={figuresSvgRef} className="heightcmp-figures-svg" width={figuresW} height={svgH}>
+                    {ticks.map(t=>(
+                      t===0 ? null : (
+                        <line key={t} x1="0" y1={cmToY(t)} x2={figuresW} y2={cmToY(t)} stroke={HEIGHTCMP_GRID_COLOR} strokeWidth="1" strokeDasharray="3,3" />
+                      )
+                    ))}
+                    {baselineChar && (
+                      <line x1="0" y1={cmToY(baselineChar.heightCm)} x2={figuresW} y2={cmToY(baselineChar.heightCm)}
+                        stroke={HEIGHTCMP_BASELINE_FILL} strokeWidth="1.5" strokeDasharray="6,4" />
+                    )}
+                    <line x1="0" y1={floorY} x2={figuresW} y2={floorY} stroke={HEIGHTCMP_FLOOR_COLOR} strokeWidth="2" />
+
+                    {displayChars.map((c, i)=>{
+                      const centerX = HEIGHTCMP_SIDE_PAD + i*HEIGHTCMP_COL_W + HEIGHTCMP_COL_W/2;
+                      const isBaseline = c.id===baselineId;
+                      const heightPx = c.heightCm*pxPerCm;
+                      const nameLines = wrapNameForChart(c.name, maxCharsPerLine);
+                      const diff = baselineChar ? (c.heightCm - baselineChar.heightCm) : null;
+                      let labelY = floorY + 16;
+                      return (
+                        <g key={c.id}>
+                          <title>{c.name || '（名称未設定）'}（{c.heightCm}cm）</title>
+                          {isBaseline && (
+                            <rect x={HEIGHTCMP_SIDE_PAD + i*HEIGHTCMP_COL_W} y={HEIGHTCMP_TOP_PAD-6}
+                              width={HEIGHTCMP_COL_W} height={svgH-HEIGHTCMP_TOP_PAD+6}
+                              fill={HEIGHTCMP_BASELINE_BG} stroke={HEIGHTCMP_BASELINE_FILL} strokeWidth="1" rx="6" />
+                          )}
+                          <HeightSilhouette centerX={centerX} floorY={floorY} heightPx={heightPx}
+                            fill={isBaseline ? HEIGHTCMP_BASELINE_FILL : HEIGHTCMP_FIGURE_FILL} />
+                          {nameLines.map((line, li)=>(
+                            <text key={li} x={centerX} y={labelY + li*13} textAnchor="middle" fontSize="11" fontWeight={isBaseline?"700":"400"} fill={HEIGHTCMP_TEXT_COLOR}>{line}</text>
+                          ))}
+                          <text x={centerX} y={labelY + nameLines.length*13 + 12} textAnchor="middle" fontSize="11" fontWeight="700" fill={HEIGHTCMP_TEXT_COLOR}>{c.heightCm}cm</text>
+                          {baselineChar && (
+                            <text x={centerX} y={labelY + nameLines.length*13 + 27} textAnchor="middle" fontSize="10.5" fill={isBaseline ? HEIGHTCMP_BASELINE_FILL : HEIGHTCMP_SUBTEXT_COLOR}>
+                              {isBaseline ? '基準' : formatHeightDiff(diff)}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -9425,6 +9735,7 @@ function App(){
   const [data, setData] = useState(loadData);
   const [screen, setScreen] = useState('dashboard');
   const [detailId, setDetailId] = useState(null);
+  const [heightCompareOpen, setHeightCompareOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [saveState, setSaveState] = useState('saved');
   const [lastImportBackup, setLastImportBackup] = useState(null); // 直前のAI一括取り込みを元に戻すための一時スナップショット（画像は含まない）
@@ -9765,11 +10076,14 @@ function App(){
   } else if(screen==='dashboard'){
     body = <Dashboard data={data} setScreen={setScreen} />;
   } else if(screen==='characters'){
-    body = detailId ? (
+    body = heightCompareOpen ? (
+      <HeightCompareView data={data} onBack={()=>setHeightCompareOpen(false)} />
+    ) : detailId ? (
       <CharacterDetail data={data} id={detailId} updateItem={updateItem} deleteItem={deleteItem} onBack={()=>setDetailId(null)} allOrgs={allOrgs} allLocations={allLocations} allTimeline={allTimeline} />
     ) : (
       <CharacterListView data={data} setData={setData}
         onOpen={setDetailId}
+        onOpenHeightCompare={()=>setHeightCompareOpen(true)}
         onCreate={()=>{ const id = createItem('characters', { name:'新しいキャラクター', realName:'', calledNames:[], kana:'', image:null, iconImageId:null, affiliationOrgIds:[], category:'', groupId:null, tags:[], age:'', summary:'', appearance:'', personality:'', values:'', goal:'', memo:'', customFields:[], images:[], relatedLocationIds:[], changes:[],
           history:'',
           heightCm:null, weightKg:null, bust:'', waist:'', hip:'', bodyType:'',
@@ -9821,7 +10135,7 @@ function App(){
     </div>;
   }
 
-  useEffect(()=>{ setDetailId(null); setWritingFocusMode(false); setMoreMenuOpen(false); }, [screen]);
+  useEffect(()=>{ setDetailId(null); setWritingFocusMode(false); setMoreMenuOpen(false); setHeightCompareOpen(false); }, [screen]);
 
   return (
     <div className="app">
