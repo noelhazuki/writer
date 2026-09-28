@@ -3763,50 +3763,87 @@ const HEIGHTCMP_PALETTE = [
   '#5a7a58', // くすんだ緑
 ];
 
-// 約7〜7.5頭身の細身で中性的なマネキン型シルエット。全員が同一の比率で、heightPxのみで等倍拡大・縮小する。
+// ---- シルエットの形（曲線パス） ----
+// 「頭上=0、床=100」のローカル座標に一度だけデザインし、実際の描画では
+// <g transform="translate(centerX, headTopY) scale(heightPx/100)"> で等比率に拡大縮小する。
+// これにより全キャラクターが完全に同じ形・同じ比率になり、背が高い人物だけ太くなることもない。
+//
+// 右半分の輪郭点（外周を上→下、内周を下→上とたどる）を1つ書けば、左右対称なので自動的にミラーして
+// 閉じたパスにする。制御点は「区間の中間の高さ」に置く単純な三次ベジェで、直角のない滑らかな輪郭になる。
+function mirrorRightHalfToClosedLoop(rightHalfPoints){
+  const left = [...rightHalfPoints].slice().reverse().map(([x,y])=>[-x,y]);
+  return [...rightHalfPoints, ...left];
+}
+function smoothClosedPathD(points){
+  let d = `M ${points[0][0].toFixed(2)} ${points[0][1].toFixed(2)} `;
+  for(let i=0;i<points.length;i++){
+    const [x1,y1] = points[i];
+    const [x2,y2] = points[(i+1)%points.length];
+    const my = y1 + (y2-y1)*0.5;
+    d += `C ${x1.toFixed(2)} ${my.toFixed(2)}, ${x2.toFixed(2)} ${my.toFixed(2)}, ${x2.toFixed(2)} ${y2.toFixed(2)} `;
+  }
+  return d + 'Z';
+}
+
+// 胴体＋脚（1本の閉じたパス）：肩から腰までは丸みを帯びて少し細くなり、股の間だけ小さな谷を作って
+// 左右の脚をはっきり分け、足先はやや幅を持たせて丸く終わる。直線的な直角は作らない。
+const HEIGHTCMP_BODY_LOCAL_RIGHT = [
+  [11.5, 16.5],  // 肩（頭の下に少し重ねて首を見せない）
+  [13.5, 23],    // 胸（一番張り出す位置、丸み）
+  [10.5, 31],    // ウエスト（少し細くなる）
+  [12.5, 39],    // 腰（脚の付け根、少し広がる）
+  [11.5, 54],    // 太もも外側
+  [8, 78],        // すね外側（足へ向けて少し細くなる）
+  [9.5, 92],      // 足首から足先にかけての外側の丸み
+  [6, 100],       // 足先の外側（床で丸くまとまる）
+  [2.2, 100],     // 足先の内側
+  [2.4, 84],       // 足首内側
+  [2.3, 55],      // すね内側
+  [2, 40],        // 股の谷（左右の脚を分ける、浅い谷）
+];
+const HEIGHTCMP_BODY_D = smoothClosedPathD(mirrorRightHalfToClosedLoop(HEIGHTCMP_BODY_LOCAL_RIGHT));
+
+// 腕（肩からゆるやかな曲線で垂れ、手先を丸くまとめた1本のしずく型パス）。胴体から少し離す。
+const HEIGHTCMP_ARM_R_LOCAL = [
+  [14.5, 19.5],  // 肩の付け根（外側）
+  [17.5, 33],    // 二の腕外側
+  [16.5, 47],    // 手首外側
+  [18.3, 53],    // 手のひら外側（丸み）
+  [15.6, 57.5],  // 手先の丸い先端
+  [12.8, 53],    // 手のひら内側
+  [13.6, 46],    // 手首内側
+  [14, 32],      // 二の腕内側
+  [13, 20.5],    // 肩の付け根（内側）
+];
+function armPathD(mirror){
+  const pts = HEIGHTCMP_ARM_R_LOCAL.map(([x,y]) => [mirror ? -x : x, y]);
+  let d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} `;
+  for(let i=0;i<pts.length;i++){
+    const [x1,y1] = pts[i];
+    const [x2,y2] = pts[(i+1)%pts.length];
+    const mx = x1 + (x2-x1)*0.5, my = y1 + (y2-y1)*0.5;
+    d += `Q ${mx.toFixed(2)} ${y1.toFixed(2)}, ${x2.toFixed(2)} ${my.toFixed(2)} `;
+  }
+  return d + 'Z';
+}
+const HEIGHTCMP_ARM_L_D = armPathD(true);
+const HEIGHTCMP_ARM_R_D = armPathD(false);
+
+const HEIGHTCMP_HEAD_R = 9;      // 頭の半径（ローカル座標。直径18 ≒ 全身の18% → 約5.6頭身）
+const HEIGHTCMP_HEAD_CY = HEIGHTCMP_HEAD_R; // 頭頂部(y=0)がheadTopYに一致するよう中心を半径ぶん下げる
+
+// 約5〜6頭身の、丸みのある中性的なデフォルメ人型シルエット。全員が完全に同じ形・同じ比率で、
+// heightPxに応じて<g>ごと等比率に拡大縮小する（体格差は付けない）。
 // heightPx はその人物の身長（heightCm）に比例した高さで、頭頂部が floorY-heightPx に一致する。
 function HeightSilhouette({ centerX, floorY, heightPx, color }){
   const headTopY = floorY - heightPx;
-  const headH = heightPx*0.135;          // 頭：縦長の楕円（約7.4頭身）
-  const headW = heightPx*0.088;          // 頭幅：全身高さの約8.8%
-  const headCenterY = headTopY + headH/2;
-  const neckH = heightPx*0.022;
-  const shoulderY = headTopY + headH + neckH;
-  const torsoH = heightPx*0.30;
-  const hipY = shoulderY + torsoH;
-  const legH = heightPx - (headH+neckH+torsoH);
-  const shoulderW = heightPx*0.225;      // 肩幅：全身高さの約22.5%
-  const hipW = shoulderW*0.76;           // 腰へ少し細くなる
-  const legGap = heightPx*0.05;          // 左右の脚を分ける間隔
-  const thighW = heightPx*0.052;
-  const ankleW = heightPx*0.032;
-  const armTopW = heightPx*0.034;
-  const armBottomW = heightPx*0.02;
-  const armGap = heightPx*0.016;         // 胴体から少し離す
-
-  const trapezoid = (topCx, topY, topW, botCx, botY, botW) => [
-    [topCx-topW/2, topY], [topCx+topW/2, topY], [botCx+botW/2, botY], [botCx-botW/2, botY]
-  ].map(p=>p.join(',')).join(' ');
-
-  const leftLegCx = centerX-legGap, rightLegCx = centerX+legGap;
-  const armWristY = hipY - torsoH*0.08;
-  const leftShoulderX = centerX-shoulderW/2-armGap, leftWristX = leftShoulderX-heightPx*0.008;
-  const rightShoulderX = centerX+shoulderW/2+armGap, rightWristX = rightShoulderX+heightPx*0.008;
-
+  const scale = heightPx/100;
   return (
-    <g>
-      {/* 脚（腰元→足元、足元へ向かって少し細くする） */}
-      <polygon points={trapezoid(leftLegCx, hipY, thighW, leftLegCx, floorY, ankleW)} fill={color} />
-      <polygon points={trapezoid(rightLegCx, hipY, thighW, rightLegCx, floorY, ankleW)} fill={color} />
-      {/* 腕（肩→手首、胴体から少し離し、手首へ向かって細くする） */}
-      <polygon points={trapezoid(leftShoulderX, shoulderY+torsoH*0.03, armTopW, leftWristX, armWristY, armBottomW)} fill={color} />
-      <polygon points={trapezoid(rightShoulderX, shoulderY+torsoH*0.03, armTopW, rightWristX, armWristY, armBottomW)} fill={color} />
-      {/* 胴体（肩→腰、少しなだらかに細くなる） */}
-      <polygon points={trapezoid(centerX, shoulderY, shoulderW, centerX, hipY, hipW)} fill={color} />
-      {/* 短い首 */}
-      <rect x={centerX-headW*0.28} y={headTopY+headH-1} width={headW*0.56} height={neckH+2} fill={color} />
-      {/* 頭（縦長の楕円） */}
-      <ellipse cx={centerX} cy={headCenterY} rx={headW/2} ry={headH/2} fill={color} />
+    <g transform={`translate(${centerX} ${headTopY}) scale(${scale})`}>
+      <path d={HEIGHTCMP_ARM_L_D} fill={color} />
+      <path d={HEIGHTCMP_ARM_R_D} fill={color} />
+      <path d={HEIGHTCMP_BODY_D} fill={color} />
+      <circle cx="0" cy={HEIGHTCMP_HEAD_CY} r={HEIGHTCMP_HEAD_R} fill={color} />
     </g>
   );
 }
@@ -3814,7 +3851,7 @@ function HeightSilhouette({ centerX, floorY, heightPx, color }){
 const HEIGHTCMP_CHART_PX = 300;    // 床から表示上限cmまでの縦ピクセル数（cm範囲に応じて自動縮尺）
 const HEIGHTCMP_TOP_PAD = 34;      // 頭上の身長表示ぶんの余白（最上部の人物でも数値が切れない高さ）
 const HEIGHTCMP_BOTTOM_PAD = 62;   // 足元の名前（最大2行）＋差分ぶんの余白
-const HEIGHTCMP_COL_W = 110;       // 一人あたりの表示幅（90〜110pxの目安の上限）
+const HEIGHTCMP_COL_W = 118;       // 一人あたりの表示幅（丸みのある腕が隣と重ならないよう90〜110pxよりやや広め）
 const HEIGHTCMP_AXIS_W = 54;       // 左側の目盛り軸の幅
 const HEIGHTCMP_SIDE_PAD = 44;     // 目盛り領域とは別に確保する、先頭・末尾人物の左右余白（40px以上）
 const HEIGHTCMP_MAJOR_STEP = 50;   // 数値付きの主要目盛り
