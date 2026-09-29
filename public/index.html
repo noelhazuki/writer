@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>小説ビルダー — 小説制作と世界設定管理</title>
+<title>小説ビルダー — 小説制作・世界設定管理</title>
 <meta property="og:title" content="物語の机">
 <meta property="og:description" content="執筆しながら設定が育つ、個人用の小説制作・世界設定管理アプリ">
 <meta property="og:image" content="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='630'%3E%3Crect width='1200' height='630' fill='%23f3efe6'/%3E%3Ctext x='600' y='330' font-size='120' text-anchor='middle' font-family='serif' fill='%233b3f5c'%3E物語の机%3C/text%3E%3C/svg%3E">
@@ -3763,13 +3763,12 @@ const HEIGHTCMP_PALETTE = [
   '#5a7a58', // くすんだ緑
 ];
 
-// ---- シルエットの形（曲線パス） ----
+// ---- シルエットの形（丸みのあるピクトグラム、パーツ別のSVG要素） ----
 // 「頭上=0、床=100」のローカル座標に一度だけデザインし、実際の描画では
-// <g transform="translate(centerX, headTopY) scale(heightPx/100)"> で等比率に拡大縮小する。
+// <g transform="translate(centerX, headTopY) scale(heightPx/100)"> で縦横同比率に拡大縮小する。
 // これにより全キャラクターが完全に同じ形・同じ比率になり、背が高い人物だけ太くなることもない。
-//
-// 右半分の輪郭点（外周を上→下、内周を下→上とたどる）を1つ書けば、左右対称なので自動的にミラーして
-// 閉じたパスにする。制御点は「区間の中間の高さ」に置く単純な三次ベジェで、直角のない滑らかな輪郭になる。
+// 頭・胴体・左右の腕・左右の脚をそれぞれ別のSVG要素として描き、関節部分は同色のまま少し重ねて
+// 継ぎ目が目立たないようにする（尖った肘・膝・手首・足首は作らない）。約6.8頭身。
 function mirrorRightHalfToClosedLoop(rightHalfPoints){
   const left = [...rightHalfPoints].slice().reverse().map(([x,y])=>[-x,y]);
   return [...rightHalfPoints, ...left];
@@ -3784,65 +3783,81 @@ function smoothClosedPathD(points){
   }
   return d + 'Z';
 }
-
-// 胴体＋脚（1本の閉じたパス）：肩から腰までは丸みを帯びて少し細くなり、股の間だけ小さな谷を作って
-// 左右の脚をはっきり分け、足先はやや幅を持たせて丸く終わる。直線的な直角は作らない。
-const HEIGHTCMP_BODY_LOCAL_RIGHT = [
-  [11.5, 16.5],  // 肩（頭の下に少し重ねて首を見せない）
-  [13.5, 23],    // 胸（一番張り出す位置、丸み）
-  [10.5, 31],    // ウエスト（少し細くなる）
-  [12.5, 39],    // 腰（脚の付け根、少し広がる）
-  [11.5, 54],    // 太もも外側
-  [8, 78],        // すね外側（足へ向けて少し細くなる）
-  [9.5, 92],      // 足首から足先にかけての外側の丸み
-  [6, 100],       // 足先の外側（床で丸くまとまる）
-  [2.2, 100],     // 足先の内側
-  [2.4, 84],       // 足首内側
-  [2.3, 55],      // すね内側
-  [2, 40],        // 股の谷（左右の脚を分ける、浅い谷）
-];
-const HEIGHTCMP_BODY_D = smoothClosedPathD(mirrorRightHalfToClosedLoop(HEIGHTCMP_BODY_LOCAL_RIGHT));
-
-// 腕（肩からゆるやかな曲線で垂れ、手先を丸くまとめた1本のしずく型パス）。胴体から少し離す。
-const HEIGHTCMP_ARM_R_LOCAL = [
-  [14.5, 19.5],  // 肩の付け根（外側）
-  [17.5, 33],    // 二の腕外側
-  [16.5, 47],    // 手首外側
-  [18.3, 53],    // 手のひら外側（丸み）
-  [15.6, 57.5],  // 手先の丸い先端
-  [12.8, 53],    // 手のひら内側
-  [13.6, 46],    // 手首内側
-  [14, 32],      // 二の腕内側
-  [13, 20.5],    // 肩の付け根（内側）
-];
-function armPathD(mirror){
-  const pts = HEIGHTCMP_ARM_R_LOCAL.map(([x,y]) => [mirror ? -x : x, y]);
-  let d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} `;
-  for(let i=0;i<pts.length;i++){
-    const [x1,y1] = pts[i];
-    const [x2,y2] = pts[(i+1)%pts.length];
+// 手・足・腕など「輪っか状の点列」を素直に閉じるための、区間中間点を制御点にした単純な二次ベジェ。
+function limbPathD(points){
+  let d = `M ${points[0][0].toFixed(2)} ${points[0][1].toFixed(2)} `;
+  for(let i=0;i<points.length;i++){
+    const [x1,y1] = points[i];
+    const [x2,y2] = points[(i+1)%points.length];
     const mx = x1 + (x2-x1)*0.5, my = y1 + (y2-y1)*0.5;
     d += `Q ${mx.toFixed(2)} ${y1.toFixed(2)}, ${x2.toFixed(2)} ${my.toFixed(2)} `;
   }
   return d + 'Z';
 }
-const HEIGHTCMP_ARM_L_D = armPathD(true);
-const HEIGHTCMP_ARM_R_D = armPathD(false);
 
-const HEIGHTCMP_HEAD_R = 9;      // 頭の半径（ローカル座標。直径18 ≒ 全身の18% → 約5.6頭身）
+// 胴体：首の下から腰までの、角のない丸い台形状の1パーツ。右半分の輪郭だけを上→下で書き、
+// 左右対称にミラーして閉じる。上端・下端は頭や脚に少し重なる位置に置き、継ぎ目を隠す。
+const HEIGHTCMP_TORSO_RIGHT = [
+  [3, 16],    // 首（頭の下、短く細い）
+  [9, 20],    // 肩（水平にせず、首からなだらかに下げる）
+  [8.7, 28],  // 胸
+  [6.8, 38],  // ウエスト（少し細くなる）
+  [7.8, 46],  // 腰（脚の付け根、わずかに広がる程度）
+  [3, 50],    // 下端（股のあたり、脚に重なって隠れる）
+];
+const HEIGHTCMP_TORSO_D = smoothClosedPathD(mirrorRightHalfToClosedLoop(HEIGHTCMP_TORSO_RIGHT));
+
+// 腕（右）：肩の付け根は胴体に重ねて接続し、そこから胴体より少し外側へ離れつつ緩やかに細くなり、
+// 手首を経て指のない小さな丸い手で終わる。肘・手首はどちらも尖らせない。
+const HEIGHTCMP_ARM_R_LOCAL = [
+  [10.5, 20],  // 肩の付け根・外側（胴体に重ねて継ぎ目を隠す）
+  [13, 32],    // 二の腕外側（胴体から離れる）
+  [12.4, 44],  // 前腕外側（手首をキュッとくびれさせず、なだらかに）
+  [13.2, 51],  // 手のひら外側（丸み）
+  [11.2, 56],  // 手先（指のない丸い先端）
+  [9.7, 51],   // 手のひら内側
+  [10, 44],    // 前腕内側
+  [10.6, 31],  // 二の腕内側
+  [10, 21],    // 肩の付け根・内側
+];
+const HEIGHTCMP_ARM_L_D = limbPathD(HEIGHTCMP_ARM_R_LOCAL.map(([x,y]) => [-x, y]));
+const HEIGHTCMP_ARM_R_D = limbPathD(HEIGHTCMP_ARM_R_LOCAL);
+
+// 脚（右）：腰の下（胴体下端に重ねる）から足先まで自然に細くなり、足首は尖らせず、
+// 足先だけわずかに幅を持たせて丸く接地する。左右へ大きく張り出させない。
+const HEIGHTCMP_LEG_R_LOCAL = [
+  [4.8, 47],  // 腰・外側（胴体下端に重ねる）
+  [5.8, 62],  // 太もも外側
+  [4.9, 80],  // すね外側（膝を丸く通過）
+  [4.5, 90],  // 足首外側（キュッとくびれさせず、なだらかに）
+  [5.6, 97],  // 足の甲（丸く広がる）
+  [4.8, 100], // 足先外側（丸く接地）
+  [2.6, 100], // 足先内側
+  [2.2, 97],  // 足首内側
+  [1.8, 80],  // すね内側
+  [2, 62],    // 太もも内側
+  [2.2, 47],  // 腰・内側
+];
+const HEIGHTCMP_LEG_L_D = limbPathD(HEIGHTCMP_LEG_R_LOCAL.map(([x,y]) => [-x, y]));
+const HEIGHTCMP_LEG_R_D = limbPathD(HEIGHTCMP_LEG_R_LOCAL);
+
+const HEIGHTCMP_HEAD_R = 7.4;    // 頭の半径（ローカル座標。直径14.8 ≒ 全身の約1/6.8 → 約6.8頭身）
 const HEIGHTCMP_HEAD_CY = HEIGHTCMP_HEAD_R; // 頭頂部(y=0)がheadTopYに一致するよう中心を半径ぶん下げる
 
-// 約5〜6頭身の、丸みのある中性的なデフォルメ人型シルエット。全員が完全に同じ形・同じ比率で、
-// heightPxに応じて<g>ごと等比率に拡大縮小する（体格差は付けない）。
+// 約6.8頭身の、丸みのある無個性なピクトグラム型シルエット。全員が完全に同じ形・同じ比率で、
+// heightPxに応じて<g>ごと縦横同比率に拡大縮小する（体格差は付けない、縦だけを伸ばさない）。
 // heightPx はその人物の身長（heightCm）に比例した高さで、頭頂部が floorY-heightPx に一致する。
+// 描画順は「脚→胴体→腕→頭」。同色で少し重ねて描くことで関節の継ぎ目を目立たなくしている。
 function HeightSilhouette({ centerX, floorY, heightPx, color }){
   const headTopY = floorY - heightPx;
   const scale = heightPx/100;
   return (
     <g transform={`translate(${centerX} ${headTopY}) scale(${scale})`}>
+      <path d={HEIGHTCMP_LEG_L_D} fill={color} />
+      <path d={HEIGHTCMP_LEG_R_D} fill={color} />
+      <path d={HEIGHTCMP_TORSO_D} fill={color} />
       <path d={HEIGHTCMP_ARM_L_D} fill={color} />
       <path d={HEIGHTCMP_ARM_R_D} fill={color} />
-      <path d={HEIGHTCMP_BODY_D} fill={color} />
       <circle cx="0" cy={HEIGHTCMP_HEAD_CY} r={HEIGHTCMP_HEAD_R} fill={color} />
     </g>
   );
