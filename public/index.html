@@ -5945,27 +5945,26 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
       </div>
       <div className="snippet-palette-body">
         <div className="writing-tools-fav-label">⭐ よく使う文字・お気に入り</div>
-        {pinnedSnippets.length===0
-          ? <div className="empty-hint" style={{padding:'4px 0'}}>表現パレットの辞書で★を付けた語がここに並びます。</div>
-          : <div className="snippet-palette-buttons">
-              {pinnedSnippets.map(sn=>(
+        <div className="snippet-palette-buttons">
+          {PUNCTUATION_SHORTCUTS.map(it=>(
+            <button key={it.key} type="button" className="snippet-btn writing-tools-symbol"
+              onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+              onClick={()=>insertIntoBody(it.text)}>{it.label}</button>
+          ))}
+          {pinnedSnippets.map(sn=>(
                 <button key={sn.id} type="button" className="snippet-btn"
                   onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
                   onClick={()=>insertIntoBody(sn.text)}>{favLabelOf(sn)}</button>
-              ))}
-            </div>}
+          ))}
+        </div>
+        {pinnedSnippets.length===0 && <div className="empty-hint" style={{padding:'4px 0'}}>表現パレットの辞書で★を付けた語は、記号の右に並びます。</div>}
       </div>
     </div>
   ) : null;
 
   // ---- 執筆記号ショートカットバー：「」――……の4記号を、下書きtextareaにフォーカスがある間だけ常設表示（表現パレットとは別機能） ----
-  const symbolBarBlock = (draftFocused && !paletteOpen && !exprDictOpen && !toolsOpen) ? (
-    <PunctuationShortcutBar
-      onInsert={insertIntoBody}
-      preventFocusSteal={preventFocusSteal}
-      style={{ bottom: symbolBarBottomOffset + 'px' }}
-    />
-  ) : null;
+  // 記号ショートカットバー（「」――……）の常時表示は廃止。記号は「道具」シートの「よく使う文字・お気に入り」から挿入する。
+  const symbolBarBlock = null;
 
   // 執筆の3区分（下書き／本文／保管棚）。常に同じ並びで表示し、今どこにいるかを明確にする。
   // シーンの地図はAI用の補助機能のため、区分とは別の小さなリンクにする。
