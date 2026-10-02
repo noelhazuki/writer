@@ -889,6 +889,21 @@
     .wsheet-backdrop{ align-items:center; }
     .wsheet{ height:min(86dvh,720px); }
   }
+  /* 下書き☰メニュー：タイトル行右端。執筆欄に重ねて表示し、本文を押し下げない */
+  .writing-header-row1 .dmenu-wrap{ position:relative; flex:0 0 auto; }
+  .dmenu-btn{ position:relative; z-index:66; min-width:40px; min-height:36px; font-size:17px; line-height:1; padding:4px 10px; border:1.5px solid var(--ink-soft); background:var(--paper-dim); color:var(--ink); box-shadow:0 1px 3px rgba(30,28,25,0.18); }
+  .dmenu-btn.active{ background:#6b4fa0; color:#fff; border-color:#6b4fa0; }
+  .dmenu-backdrop{ position:fixed; inset:0; z-index:64; background:transparent; }
+  .dmenu{ position:absolute; right:0; top:calc(100% + 8px); z-index:65; display:flex; flex-direction:column; align-items:flex-end; gap:10px; padding:2px 2px 6px; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; box-sizing:border-box; max-width:calc(100vw - 16px); scrollbar-width:none; }
+  .dmenu::-webkit-scrollbar{ display:none; }
+  .dmenu-part{ display:flex; align-items:center; gap:8px; flex:0 0 auto; background:none; border:none; padding:0; transform-origin:right center; animation:dmenuPop .22s cubic-bezier(.34,1.56,.64,1) both; }
+  .dmenu-part-label{ background:rgba(30,28,25,0.88); color:#fff; font-size:12.5px; line-height:1; padding:7px 11px; border-radius:999px; white-space:nowrap; box-shadow:0 3px 10px rgba(30,28,25,0.25); }
+  .dmenu-part-icon{ width:48px; height:48px; border-radius:50%; background:var(--card); border:1px solid var(--line); box-shadow:0 4px 12px rgba(30,28,25,0.28); display:flex; align-items:center; justify-content:center; font-size:22px; line-height:1; }
+  button.dmenu-part:active .dmenu-part-icon{ background:var(--paper-dim); transform:scale(0.94); }
+  .dmenu-part-font{ background:var(--card); border:1px solid var(--line); border-radius:999px; padding:6px 10px; box-shadow:0 4px 12px rgba(30,28,25,0.28); }
+  .dmenu-part-font .dmenu-part-label{ background:none; color:var(--ink-soft); box-shadow:none; padding:0 4px 0 2px; }
+  @keyframes dmenuPop{ from{ opacity:0; transform:translateY(-10px) scale(0.5); } to{ opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce){ .dmenu-part{ animation:none; } }
   .up-bar{ display:none; }
   @media (max-width:880px){
     .up-bar{ display:block; margin:-4px 0 10px; }
@@ -5390,6 +5405,9 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const [dictEditorOpen, setDictEditorOpen] = useState(false);
   const [toolsMode, setToolsMode] = useState('fav'); // 道具パネルの表示：'fav'（記号・お気に入り）| 'palette'（表現パレット）
   const [toolsCatId, setToolsCatId] = useState(null); // 道具の表現パレットで選択中のカテゴリ
+  const [draftMenuOpen, setDraftMenuOpen] = useState(false); // 下書きタイトル行の☰メニュー（初期は閉じる）
+  const draftMenuBtnRef = useRef(null);
+  const [draftMenuMaxH, setDraftMenuMaxH] = useState(480);
   const [flowOpen, setFlowOpen] = useState(false); // シーン進行モーダル
   const [flowEditing, setFlowEditing] = useState(false); // シーン進行モーダル内：閲覧→編集の切替
   const [flowActiveId, setFlowActiveId] = useState(''); // シーン進行で選択中のプラン（閲覧・編集で共有）
@@ -5435,6 +5453,21 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const bottomTabsHeight = useSelectorHeight('.bottom-tabs', !focusMode);
   const keyboardInset = useKeyboardInset();
   sheetOpenRef.current = exprDictOpen || flowOpen;
+  // ☰メニューが画面（キーボード分を除く）からはみ出さないよう、ボタン下端から残りの高さを上限にする（超える分はメニュー内で縦スクロール）
+  useEffect(()=>{
+    if(!draftMenuOpen) return;
+    const calc = () => {
+      const el = draftMenuBtnRef.current; if(!el) return;
+      const vv = window.visualViewport;
+      const bottom = vv ? (vv.offsetTop + vv.height) : window.innerHeight;
+      setDraftMenuMaxH(Math.max(120, Math.floor(bottom - el.getBoundingClientRect().bottom - 14)));
+    };
+    calc();
+    const vv = window.visualViewport;
+    window.addEventListener('resize', calc); window.addEventListener('scroll', calc, true);
+    if(vv){ vv.addEventListener('resize', calc); vv.addEventListener('scroll', calc); }
+    return ()=>{ window.removeEventListener('resize', calc); window.removeEventListener('scroll', calc, true); if(vv){ vv.removeEventListener('resize', calc); vv.removeEventListener('scroll', calc); } };
+  }, [draftMenuOpen, keyboardInset]);
   const paletteBottomOffset = (focusMode ? 0 : bottomTabsHeight) + keyboardInset;
   // 執筆記号ショートカットバー：道具シート・パレット・辞典のどれも開いていない時だけ出るため、同じ下端位置でよい
   const symbolBarBottomOffset = paletteBottomOffset;
@@ -5514,8 +5547,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     if(!activeDraft)return;
     setData(d=>({...d,drafts:(d.drafts||[]).map(x=>x.id===activeDraft.id?{...x,title,updatedAt:new Date().toISOString()}:x)}));
   };
-  const openDraft=(id)=>{ setFlowOpen(false);setExprDictOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:id})); };
-  const backToDraftList=()=>{ setFlowOpen(false);setExprDictOpen(false);setDraftHistoryOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:null})); };
+  const openDraft=(id)=>{ setDraftMenuOpen(false); setFlowOpen(false);setExprDictOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:id})); };
+  const backToDraftList=()=>{ setDraftMenuOpen(false); setFlowOpen(false);setExprDictOpen(false);setDraftHistoryOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:null})); };
   const addBlankDraft=()=>{
     const entry=makeDraftEntry('無題の下書き','',null,null);
     hasCursorInfoRef.current=false;
@@ -5646,6 +5679,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   // ---- 戻る操作（Appから呼ばれる）：画面内で「一つ上」へ戻れたら true。戻れる所が無ければ false。 ----
   // 順に：開いているダイアログ → シート／ドロワー → 集中モード → 下書き編集（→一覧）／ゴミ箱（→一覧） → 本文の通し読み（→場面一覧）／章（→章一覧）
   const handleBack = () => {
+    if(draftMenuOpen){ setDraftMenuOpen(false); return true; } // 開いている☰メニューを先に閉じる
     if(copyDlg){ setCopyDlg(null); return true; }
     if(passageDraft){ setPassageDraft(null); return true; }
     if(mapDraft){ setMapDraft(null); return true; }
@@ -6089,7 +6123,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
 
   // 執筆の3区分（下書き／本文／保管棚）。常に同じ並びで表示し、今どこにいるかを明確にする。
   // シーンの地図はAI用の補助機能のため、区分とは別の小さなリンクにする。
-  const switchWritingTab = (tab) => { setExprDictOpen(false); setFlowOpen(false); setToolsOpen(false); setWritingMoreOpen(false); setWorkspaceTab(tab); };
+  const switchWritingTab = (tab) => { setDraftMenuOpen(false); setExprDictOpen(false); setFlowOpen(false); setToolsOpen(false); setWritingMoreOpen(false); setWorkspaceTab(tab); };
   const tabsBar = (
     <div className="writing-seg-wrap">
       <div className="writing-seg" role="tablist" aria-label="執筆の区分">
@@ -6235,22 +6269,37 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         </>}
       </div>}
       {workspaceTab==='draft' && activeDraft && <div className="writing-block-board">
-        <div className="writing-header-row1">
+        <div className="writing-header-row1" style={{marginBottom:8}}>
           <button type="button" className="writing-back-btn" onClick={backToDraftList} title="下書き一覧に戻る" aria-label="下書き一覧に戻る">
             <span className="wh-back-full">← 下書き一覧</span><span className="wh-back-short">←</span>
           </button>
           <input className="writing-title-input" value={activeDraft.title} onChange={e=>setDraftTitle(e.target.value)} placeholder="下書きの見出し" />
           <span className="wordcount">{draftBody.length.toLocaleString()} 文字</span>
-        </div>
-        <div className="writing-header-row2" style={{marginBottom:8}}>
-          <button className="btn btn-sm" onClick={()=>setFocusMode(true)}><span className="wh-label-full">集中モード</span><span className="wh-label-short">集中</span></button>
-          <button type="button" className={"btn btn-sm"+(toolsOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleTools}>🧰 道具</button>
-          <button type="button" className={"btn btn-sm"+(exprDictOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={openDictModal}>📖 辞書</button>
-          <button type="button" className={"btn btn-sm"+(flowOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={openFlowModal}><span className="wh-label-full">シーン進行</span><span className="wh-label-short">進行</span></button>
-          <button type="button" className="btn btn-sm btn-primary" onClick={openCopyToBody}><span className="wh-label-full">📋 本文へコピー</span><span className="wh-label-short">📋 本文へ</span></button>
-          <button type="button" className="btn btn-sm" onClick={()=>setDraftHistoryOpen(true)}>履歴</button>
-          <span className="writing-only-desktop"><FontSizeControl value={writingFontSize} onChange={setWritingFontSize} /></span>
-          <button type="button" className="btn btn-sm writing-more-btn writing-only-mobile" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleWritingMore} aria-label="その他の操作" title="その他の操作">⋯</button>
+          <div className="dmenu-wrap">
+            <button type="button" ref={draftMenuBtnRef} className={"btn btn-sm dmenu-btn"+(draftMenuOpen?" active":"")} aria-label="下書きの操作メニュー" aria-haspopup="menu" aria-expanded={draftMenuOpen}
+              onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>setDraftMenuOpen(o=>!o)}>☰</button>
+            {draftMenuOpen && (<>
+              <div className="dmenu-backdrop" onMouseDown={(e)=>{ e.preventDefault(); rememberEditorState(); setDraftMenuOpen(false); }} onPointerDown={(e)=>{ e.preventDefault(); rememberEditorState(); setDraftMenuOpen(false); }} />
+              <div className="dmenu" role="menu" style={{ maxHeight: draftMenuMaxH + 'px' }}>
+                {[
+                  ['集中モード','🎯', ()=>setFocusMode(true)],
+                  ['道具','🧰', toggleTools],
+                  ['辞書','📖', openDictModal],
+                  ['シーン進行','🎬', openFlowModal],
+                  ['本文へコピー','📋', openCopyToBody],
+                  ['履歴','🕘', ()=>setDraftHistoryOpen(true)],
+                ].map(([label, icon, fn], idx)=>(
+                  <button key={label} type="button" role="menuitem" className="dmenu-part" style={{ animationDelay:(idx*35)+'ms' }} aria-label={label}
+                    onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal}
+                    onClick={()=>{ setDraftMenuOpen(false); fn(); }}>
+                    <span className="dmenu-part-label">{label}</span>
+                    <span className="dmenu-part-icon" aria-hidden="true">{icon}</span>
+                  </button>
+                ))}
+                <div className="dmenu-part dmenu-part-font" style={{ animationDelay:'210ms' }}><span className="dmenu-part-label">文字サイズ</span><FontSizeControl value={writingFontSize} onChange={setWritingFontSize} /></div>
+              </div>
+            </>)}
+          </div>
         </div>
         <textarea id="drafting-area" ref={textareaRef} className="writing-body-area" style={{fontSize:writingFontSize}} value={draftBody}
           onChange={e=>{ setDraftBody(e.target.value); rememberEditorState(); }}
