@@ -863,6 +863,32 @@
   .writing-toast-btn{ flex:0 0 auto; background:#fff; color:var(--ink); border:none; border-radius:999px; padding:5px 12px; font-size:12px; font-weight:700; }
   .copy-dlg-choices{ display:flex; flex-direction:column; gap:6px; }
   .copy-dlg-choices label{ display:flex; align-items:center; gap:6px; font-size:14px; }
+  /* ---- 道具パネル（記号・お気に入り・表現パレットの共通パネル）：ヘッダー固定、ボタン列のみ横スクロール ---- */
+  .writing-tools-head{ border-bottom:none; }
+  .writing-tools-head .snippet-palette-head-actions .btn{ white-space:nowrap; min-height:36px; }
+  .wt-seg{ display:flex; gap:4px; flex:1 1 auto; min-width:0; }
+  .wt-seg-btn{ flex:0 0 auto; min-height:36px; padding:0 12px; font-size:13px; white-space:nowrap; border:1px solid var(--line); border-radius:999px; background:#fffdf8; color:var(--ink-soft); }
+  .wt-seg-btn.active{ background:var(--accent); color:#fff; border-color:var(--accent); font-weight:700; }
+  .wt-cats{ display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:thin; padding:0 10px 4px; flex:0 0 auto; }
+  .wt-cats .snippet-cat-tab{ min-height:32px; line-height:1.3; }
+  .wt-empty{ font-size:12px; color:var(--ink-soft); white-space:nowrap; padding:8px 4px; }
+  .writing-tools-body{ padding-top:0; }
+  /* ---- 辞書／シーン進行の共通シート ---- */
+  .wsheet-backdrop{ position:fixed; left:0; right:0; top:0; z-index:90; background:rgba(30,28,25,0.4); display:flex; align-items:flex-end; justify-content:center; padding:8px; box-sizing:border-box; overscroll-behavior:contain; touch-action:none; }
+  .wsheet{ touch-action:auto; background:var(--card); border-radius:14px; width:100%; max-width:760px; height:100%; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 12px 40px rgba(0,0,0,0.25); }
+  .wsheet-pane{ flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+  .wsheet-head{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--line); flex:0 0 auto; }
+  .wsheet-title{ flex:1 1 auto; min-width:0; font-weight:700; font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .wsheet-body{ flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:10px 12px 16px; }
+  .wsheet .expr-dict-panel{ position:relative; left:auto; right:auto; bottom:auto; max-width:none; max-height:none; height:100%; flex:1 1 auto; min-height:0; border:none; border-radius:0; box-shadow:none; z-index:auto; margin:0; }
+  .wsheet .expr-dict-body{ overscroll-behavior:contain; }
+  .expr-dict-panel > .dict-cat-tabs{ flex:0 0 auto; overflow-y:hidden; padding-bottom:6px; align-items:center; }
+  .expr-dict-panel > .dict-cat-tabs .dict-cat-tab{ min-height:34px; line-height:1.3; }
+  .expr-dict-panel > .dict-tab-switch-row .dict-tab-btn{ min-height:34px; line-height:1.3; }
+  @media (min-width:881px){
+    .wsheet-backdrop{ align-items:center; }
+    .wsheet{ height:min(86dvh,720px); }
+  }
   .up-bar{ display:none; }
   @media (max-width:880px){
     .up-bar{ display:block; margin:-4px 0 10px; }
@@ -5341,7 +5367,9 @@ function Plot({ data, setData, allChars, allLocations }){
 }
 
 /* ============ 本文 ============ */
-function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, adultDictionary, adultOnomatopoeia, adultSceneFlow, onOpenAdultTools, onOpenSceneFlowScreen, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId, openId, setOpenId, activeBlockId, setActiveBlockId, backRef }){
+const WRITING_LAST_DICT_TAB_KEY='novel-world-builder-writing-last-dict-tab-v1';
+const WRITING_DICT_TABS=['expression','special','media','adult','onomatopoeia'];
+function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, adultDictionary, setAdultDictionary, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow, onOpenAdultTools, onOpenSceneFlowScreen, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId, openId, setOpenId, activeBlockId, setActiveBlockId, backRef }){
   // 検索結果などから特定の章を直接開きたいとき（openChapterIdが変化するたび）に本文タブへ切り替えて開く。
   useEffect(()=>{
     if(!openChapterId) return;
@@ -5359,14 +5387,22 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const [mapDraft,setMapDraft]=useState(null);
   const [mapImport,setMapImport]=useState('');
   const [writingFontSize, setWritingFontSizeState] = useState(loadWritingFontSize);
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [dictEditorOpen, setDictEditorOpen] = useState(false);
-  const [toolsMenuOpen, setToolsMenuOpen] = useState(false); // 道具内メニュー（辞書・表現パレット等への入口）の開閉。初期は閉じる
+  const [toolsMode, setToolsMode] = useState('fav'); // 道具パネルの表示：'fav'（記号・お気に入り）| 'palette'（表現パレット）
+  const [toolsCatId, setToolsCatId] = useState(null); // 道具の表現パレットで選択中のカテゴリ
+  const [flowOpen, setFlowOpen] = useState(false); // シーン進行モーダル
+  const [flowEditing, setFlowEditing] = useState(false); // シーン進行モーダル内：閲覧→編集の切替
+  const [flowActiveId, setFlowActiveId] = useState(''); // シーン進行で選択中のプラン（閲覧・編集で共有）
+  const [adultEdit, setAdultEdit] = useState(null); // 辞書モーダル内の編集：null | 'adult'（成人向け表現）| 'onomatopoeia'
+  const editDirtyRef = useRef(false); // モーダル内編集で入力があったか（閉じる時の確認用）
+  const sheetOpenRef = useRef(false); // 辞書／シーン進行モーダルが開いている間はtrue（挿入時に下書きへフォーカスを奪い返さない）
   const [toolsOpen, setToolsOpen] = useState(false); // 執筆中の道具シート（よく使う文字・お気に入り／辞書から探す）
   const [copyDlg, setCopyDlg] = useState(null); // 「本文へコピー」ダイアログ
   const [exprDictOpen, setExprDictOpen] = useState(false);
   const [exprDictEditorOpen, setExprDictEditorOpen] = useState(false);
-  const [dictTab, setDictTab] = useState('expression'); // 辞典ドロワー内タブ：'expression'（表現辞典）| 'special'（小説語彙）| 'media'（メディア語）
+  // 辞書モーダルの種類：'expression'｜'special'｜'media'｜'adult'｜'onomatopoeia'。前回使った種類を記憶し、次回はその種類から開く。
+  const [dictTab, setDictTabState] = useState(()=>{ try{ const v=localStorage.getItem(WRITING_LAST_DICT_TAB_KEY); if(WRITING_DICT_TABS.includes(v)) return v; }catch(e){} return 'expression'; });
+  const setDictTab = (t) => { if(!WRITING_DICT_TABS.includes(t)) return; setDictTabState(t); try{ localStorage.setItem(WRITING_LAST_DICT_TAB_KEY, t); }catch(e){} };
   const [specialDictEditorOpen, setSpecialDictEditorOpen] = useState(false);
   const [mediaDictEditorOpen, setMediaDictEditorOpen] = useState(false);
   const [writingMoreOpen, setWritingMoreOpen] = useState(false); // スマホ「⋯」：文字サイズ／メモへ移動／章削除
@@ -5398,6 +5434,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   // どちらもソフトウェアキーボード表示中はvisualViewportで隠れた分だけさらに押し上げる。
   const bottomTabsHeight = useSelectorHeight('.bottom-tabs', !focusMode);
   const keyboardInset = useKeyboardInset();
+  sheetOpenRef.current = exprDictOpen || flowOpen;
   const paletteBottomOffset = (focusMode ? 0 : bottomTabsHeight) + keyboardInset;
   // 執筆記号ショートカットバー：道具シート・パレット・辞典のどれも開いていない時だけ出るため、同じ下端位置でよい
   const symbolBarBottomOffset = paletteBottomOffset;
@@ -5477,8 +5514,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     if(!activeDraft)return;
     setData(d=>({...d,drafts:(d.drafts||[]).map(x=>x.id===activeDraft.id?{...x,title,updatedAt:new Date().toISOString()}:x)}));
   };
-  const openDraft=(id)=>{ setPaletteOpen(false);setExprDictOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:id})); };
-  const backToDraftList=()=>{ setPaletteOpen(false);setExprDictOpen(false);setDraftHistoryOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:null})); };
+  const openDraft=(id)=>{ setFlowOpen(false);setExprDictOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:id})); };
+  const backToDraftList=()=>{ setFlowOpen(false);setExprDictOpen(false);setDraftHistoryOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:null})); };
   const addBlankDraft=()=>{
     const entry=makeDraftEntry('無題の下書き','',null,null);
     hasCursorInfoRef.current=false;
@@ -5620,7 +5657,12 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     if(specialDictEditorOpen){ setSpecialDictEditorOpen(false); return true; }
     if(mediaDictEditorOpen){ setMediaDictEditorOpen(false); return true; }
     if(writingMoreOpen){ setWritingMoreOpen(false); return true; }
-    if(paletteOpen || exprDictOpen || toolsOpen){ setPaletteOpen(false); setExprDictOpen(false); setToolsOpen(false); return true; }
+    // 編集中なら閲覧へ、閲覧中ならモーダルを閉じる、の順に戻る
+    if(adultEdit){ leaveAdultEdit(); return true; }
+    if(flowEditing){ leaveFlowEdit(); return true; }
+    if(flowOpen){ closeFlow(); return true; }
+    if(exprDictOpen){ closeExprDict(); return true; }
+    if(toolsOpen){ setToolsOpen(false); return true; }
     if(focusMode){ setFocusMode(false); return true; }
     if(workspaceTab==='draft'){
       if(activeDraft){ backToDraftList(); return true; }
@@ -5742,16 +5784,16 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     return { start, end };
   };
 
-  const restoreFocusAndSelection = (pos) => {
+  const restoreFocusAndSelection = (pos, endPos) => {
     // 挿入直前に保存しておいたスクロール位置のスナップショット（この後の非同期処理中に上書きされないようここで固定）
     const scroll = { ...savedScrollRef.current };
     requestAnimationFrame(()=>{
       const el = textareaRef.current;
       if(!el) return;
-      // 1. フォーカス（ブラウザ自身のスクロールは起こさない）
-      try{ el.focus({ preventScroll:true }); }catch(e){ el.focus(); }
-      // 2. カーソル位置（ここでブラウザがキャレット追従スクロールを行うことがある）
-      try{ el.setSelectionRange(pos, pos); }catch(e){}
+      // 1. フォーカス（ブラウザ自身のスクロールは起こさない）。辞書／シーン進行モーダルが開いている間は、モーダル内の入力を妨げないよう奪い返さない。
+      if(!sheetOpenRef.current){ try{ el.focus({ preventScroll:true }); }catch(e){ el.focus(); } }
+      // 2. カーソル位置・選択範囲（ここでブラウザがキャレット追従スクロールを行うことがある）
+      try{ el.setSelectionRange(pos, endPos===undefined ? pos : endPos); }catch(e){}
       // 3. textarea自身のスクロール位置を復元（ブラウザの自動スクロールを打ち消す）
       el.scrollTop = scroll.textareaScrollTop;
       // 4. 外側のスクロール位置を復元
@@ -5772,7 +5814,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     const newPos = start + text.length;
     setDraftBody(newBody);
     savedSelectionRef.current = { start:newPos, end:newPos };
-    restoreFocusAndSelection(newPos);
+    restoreFocusAndSelection(newPos, newPos);
   };
 
   const openDictEditor = () => { rememberEditorState(); setDictEditorOpen(true); };
@@ -5783,10 +5825,27 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
 
   // ---- 表現辞典：開閉・挿入は表現パレットと同じ savedSelectionRef / insertIntoBody を再利用する ----
   const openExprDict = () => { rememberEditorState(); setExprDictOpen(true); };
-  const closeExprDict = () => {
-    setExprDictOpen(false);
-    restoreFocusAndSelection(savedSelectionRef.current.start);
+  // 編集中（モーダル内）に入力があった場合は、閉じる前に確認する（保存前の入力が意図せず失われないようにする）
+  const confirmLeaveEdit = () => {
+    if(editDirtyRef.current && !confirm('編集中の入力は、保存していないと失われる場合があります。閉じますか？')) return false;
+    editDirtyRef.current = false;
+    return true;
   };
+  const restoreSavedSelection = () => restoreFocusAndSelection(savedSelectionRef.current.start, savedSelectionRef.current.end);
+  const closeExprDict = () => {
+    if(adultEdit && !confirmLeaveEdit()) return;
+    setAdultEdit(null);
+    setExprDictOpen(false);
+    restoreSavedSelection();
+  };
+  const leaveAdultEdit = () => { if(!confirmLeaveEdit()) return; setAdultEdit(null); };
+  const closeFlow = () => {
+    if(flowEditing && !confirmLeaveEdit()) return;
+    setFlowEditing(false);
+    setFlowOpen(false);
+    restoreSavedSelection();
+  };
+  const leaveFlowEdit = () => { if(!confirmLeaveEdit()) return; setFlowEditing(false); };
   const openExprDictEditor = () => { rememberEditorState(); setExprDictEditorOpen(true); };
   const closeExprDictEditor = () => {
     setExprDictEditorOpen(false);
@@ -5804,9 +5863,10 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   };
   // 成人向け表現辞典・オノマトペ・進行表は、専用の編集モーダルを持たず、既存の「成人向け創作」画面の
   // 各タブへ遷移して編集する（既存の登録・編集機能をそのまま使う）。遷移時はこのドロワーを閉じる。
-  const goToAdultDict = () => { setExprDictOpen(false); onOpenAdultTools&&onOpenAdultTools('dict'); };
-  const goToOnomatopoeia = () => { setExprDictOpen(false); onOpenAdultTools&&onOpenAdultTools('onomatopoeia'); };
-  const goToSceneFlow = () => { setExprDictOpen(false); onOpenSceneFlowScreen&&onOpenSceneFlowScreen(); };
+  // 編集は別ページへ遷移せず、同じモーダル内で閲覧→編集に切り替える（既存の編集画面部品を再利用。保存先は変えない）。
+  const goToAdultDict = () => { rememberEditorState(); editDirtyRef.current = false; setAdultEdit('adult'); };
+  const goToOnomatopoeia = () => { rememberEditorState(); editDirtyRef.current = false; setAdultEdit('onomatopoeia'); };
+  const goToSceneFlow = () => { rememberEditorState(); editDirtyRef.current = false; setFlowEditing(true); };
   // シーン進行を下書きへ挿入する直前に、必ず現在の内容を履歴へ退避してから、カーソル位置（不明なら末尾）へ挿入する。
   // 挿入位置の前後に既に改行が無ければ、地続きにならないよう改行を補う（本文の内容そのものは変えない）。
   const insertSceneFlowText = (text) => {
@@ -5821,32 +5881,24 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     insertIntoBody(lead + text + trail);
   };
 
-  const paletteBlock = paletteOpen ? (
-    <SnippetPalette
-      categories={writingSnippets.categories}
-      snippets={writingSnippets.snippets}
-      onInsert={insertIntoBody}
-      onOpenEditor={openDictEditor}
-      onClose={()=>setPaletteOpen(false)}
-      preventFocusSteal={preventFocusSteal}
-      style={{ bottom: paletteBottomOffset + 'px' }}
-    />
-  ) : null;
-
   const dictEditorBlock = dictEditorOpen ? (
     <WritingSnippetDictionaryModal writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} onClose={closeDictEditor} />
   ) : null;
 
   // ---- 辞典ドロワー（参照パネル）。[表現辞典][小説語彙][メディア語]をdictTabで切り替える。いずれも候補は下書きへ挿入せず、コピー中心 ----
+  // ---- 辞書モーダル：[表現辞典][小説語彙][メディア語][成人向け表現][オノマトペ]を共通モーダル内で切り替える。既存の検索・候補表示・コピー・挿入はそのまま使う。
+  //      編集は同じモーダル内で行う（成人向け表現・オノマトペ＝モーダル内の編集ペイン／表現・小説語彙・メディア語＝既存の編集モーダルへ切替。閲覧側は閉じずに隠して状態を保つ）。
+  const dictViewHidden = exprDictEditorOpen || specialDictEditorOpen || mediaDictEditorOpen;
   const exprDictBlock = exprDictOpen ? (
-    dictTab==='special' ? (
+    <WritingSheet onClose={closeExprDict} bottomInset={keyboardInset} hidden={dictViewHidden} label="辞書">
+      <div className="wsheet-pane" style={adultEdit ? {display:'none'} : null}>
+    {dictTab==='special' ? (
       <SpecialDictionaryPanel
         dictionary={specialDictionary}
         onOpenEditor={openSpecialDictEditor}
         onClose={closeExprDict}
         onInsert={insertIntoBody}
         preventFocusSteal={preventFocusSteal}
-        style={{ bottom: paletteBottomOffset + 'px' }}
         dictTab={dictTab}
         onDictTabChange={setDictTab}
       />
@@ -5857,7 +5909,6 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         onClose={closeExprDict}
         onInsert={insertIntoBody}
         preventFocusSteal={preventFocusSteal}
-        style={{ bottom: paletteBottomOffset + 'px' }}
         dictTab={dictTab}
         onDictTabChange={setDictTab}
       />
@@ -5868,7 +5919,6 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         onClose={closeExprDict}
         onInsert={insertIntoBody}
         preventFocusSteal={preventFocusSteal}
-        style={{ bottom: paletteBottomOffset + 'px' }}
         dictTab={dictTab}
         onDictTabChange={setDictTab}
       />
@@ -5879,19 +5929,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         onClose={closeExprDict}
         onInsert={insertIntoBody}
         preventFocusSteal={preventFocusSteal}
-        style={{ bottom: paletteBottomOffset + 'px' }}
         dictTab={dictTab}
         onDictTabChange={setDictTab}
-      />
-    ) : dictTab==='sceneFlow' ? (
-      <SceneFlowReferencePanel
-        plans={(data.sceneFlowPlans||[])}
-        onOpenEditor={goToSceneFlow}
-        onClose={closeExprDict}
-        onBack={backToToolsFromDict}
-        onInsert={insertSceneFlowText}
-        preventFocusSteal={preventFocusSteal}
-        style={{ bottom: paletteBottomOffset + 'px' }}
       />
     ) : (
       <ExpressionDictionaryPanel
@@ -5900,11 +5939,43 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         onClose={closeExprDict}
         onInsert={insertIntoBody}
         preventFocusSteal={preventFocusSteal}
-        style={{ bottom: paletteBottomOffset + 'px' }}
         dictTab={dictTab}
         onDictTabChange={setDictTab}
       />
-    )
+    )}
+      </div>
+      {adultEdit && (
+        <WritingSheetEditPane title={adultEdit==='adult' ? '成人向け表現を編集' : 'オノマトペを編集'} onBack={leaveAdultEdit} onClose={closeExprDict} dirtyRef={editDirtyRef}>
+          {adultEdit==='adult'
+            ? <AdultExpressionDictionaryTab adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} />
+            : <AdultOnomatopoeiaTab data={adultOnomatopoeia} setData={setAdultOnomatopoeia} />}
+        </WritingSheetEditPane>
+      )}
+    </WritingSheet>
+  ) : null;
+
+  // ---- シーン進行モーダル：辞書とは別。全年齢・成人向けの既存プランを参照し、下書きへ挿入できる。編集は同じモーダル内で切り替える。 ----
+  const flowBlock = flowOpen ? (
+    <WritingSheet onClose={closeFlow} bottomInset={keyboardInset} label="シーン進行">
+      <div className="wsheet-pane" style={flowEditing ? {display:'none'} : null}>
+        <SceneFlowReferencePanel
+          plans={(data.sceneFlowPlans||[])}
+          activeId={flowActiveId}
+          onActiveChange={setFlowActiveId}
+          onOpenEditor={goToSceneFlow}
+          onClose={closeFlow}
+          onInsert={insertSceneFlowText}
+          preventFocusSteal={preventFocusSteal}
+        />
+      </div>
+      {flowEditing && (
+        <WritingSheetEditPane title="シーン進行を編集" onBack={leaveFlowEdit} onClose={closeFlow} dirtyRef={editDirtyRef}>
+          <SceneFlowPlansEditor data={data} setData={setData} kindFilter="all" allowKindSwitch adultLibrary={adultSceneFlow}
+            onInsertToDraft={(plan)=>insertSceneFlowText(formatSceneFlowPlanForInsert(plan))}
+            initialActiveId={flowActiveId} onActiveChange={setFlowActiveId} />
+        </WritingSheetEditPane>
+      )}
+    </WritingSheet>
   ) : null;
 
   const exprDictEditorBlock = exprDictEditorOpen ? (
@@ -5919,15 +5990,11 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     <MediaDictionaryEditorModal mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} onClose={closeMediaDictEditor} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} />
   ) : null;
 
-  // 表現パレットと表現辞典は同じ下部ドロワー枠を使うため、同時に開かないようにする
-  const togglePalette = () => { setPaletteOpen(o=>{ const next=!o; if(next){ setExprDictOpen(false); setWritingMoreOpen(false); setToolsOpen(false); } return next; }); };
-  const toggleExprDict = () => { setExprDictOpen(o=>{ const next=!o; if(next){ setPaletteOpen(false); setWritingMoreOpen(false); setToolsOpen(false); } return next; }); };
-  const toggleWritingMore = () => { setWritingMoreOpen(o=>{ const next=!o; if(next){ setPaletteOpen(false); setExprDictOpen(false); setToolsOpen(false); } return next; }); };
-  const toggleTools = () => { setToolsOpen(o=>{ const next=!o; setToolsMenuOpen(false); if(next){ setPaletteOpen(false); setExprDictOpen(false); setWritingMoreOpen(false); } return next; }); };
-  // 道具シートから各ドロワーへ。道具シートは閉じ、カーソル位置はpreventFocusStealで保持済み。
-  const openPaletteFromTools = () => { setToolsMenuOpen(false); setToolsOpen(false); setExprDictOpen(false); setPaletteOpen(true); };
-  const backToToolsFromDict = () => { setToolsMenuOpen(false); setExprDictOpen(false); setPaletteOpen(false); setToolsOpen(true); }; // シーン進行等から道具へ戻る（メニューは折りたたんだ状態）
-  const openDictFromTools = (tab) => { setToolsMenuOpen(false); setToolsOpen(false); setPaletteOpen(false); setDictTab(tab||'expression'); setExprDictOpen(true); };
+  // 道具（下部パネル）／辞書モーダル／シーン進行モーダルは、同時に開かない
+  const toggleWritingMore = () => { setWritingMoreOpen(o=>{ const next=!o; if(next){ setExprDictOpen(false); setFlowOpen(false); setToolsOpen(false); } return next; }); };
+  const toggleTools = () => { setToolsOpen(o=>{ const next=!o; if(next){ setExprDictOpen(false); setFlowOpen(false); setWritingMoreOpen(false); } return next; }); };
+  const openDictModal = () => { setToolsOpen(false); setWritingMoreOpen(false); setFlowOpen(false); setFlowEditing(false); setAdultEdit(null); setExprDictOpen(true); };
+  const openFlowModal = () => { setToolsOpen(false); setWritingMoreOpen(false); setExprDictOpen(false); setAdultEdit(null); setFlowEditing(false); setFlowOpen(true); };
 
   // ---- 「⋯」→メモ・関連情報を開く：集中モード中なら先に集中モードを終了してからスクロールする ----
   const openMemoSection = () => {
@@ -5970,37 +6037,49 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   //      ・表現パレット／シーン進行／成人向け候補は既存ドロワーへの入口 ----
   const pinnedSnippets = writingSnippets.snippets.filter(s=>s.pinned).sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0));
   const favLabelOf = (sn) => { const t = sn.text||''; if(t && t.length<=6) return t; return sn.label ? sn.label : t; };
+  // 道具＝小さい共通パネル。ヘッダー（お気に入り／表現パレットの切替・編集・閉じる）は固定し、ボタン列だけを横スクロールにする。
   const toolsBtnProps = { onMouseDown:preventFocusSteal, onPointerDown:preventFocusSteal };
-  const toolsBlock = (toolsOpen && !paletteOpen && !exprDictOpen && (workspaceTab==='draft')) ? (
+  const toolsSnippetCats = [...writingSnippets.categories].sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0))
+    .filter(cat=>writingSnippets.snippets.some(sn=>sn.categoryId===cat.id));
+  const toolsActiveCat = toolsSnippetCats.find(c=>c.id===toolsCatId) || toolsSnippetCats[0] || null;
+  const toolsCatSnippets = toolsActiveCat ? writingSnippets.snippets.filter(sn=>sn.categoryId===toolsActiveCat.id).sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0)) : [];
+  const toolsBlock = (toolsOpen && (workspaceTab==='draft')) ? (
     <div className="snippet-palette writing-tools-drawer" style={{ bottom: paletteBottomOffset + 'px' }}>
       <div className="snippet-palette-head writing-tools-head">
-        <div className="snippet-palette-buttons writing-tools-symbols">
-          {PUNCTUATION_SHORTCUTS.map(it=>(
+        <div className="wt-seg" role="tablist" aria-label="道具の切替">
+          <button type="button" role="tab" aria-selected={toolsMode==='fav'} className={"wt-seg-btn"+(toolsMode==='fav'?" active":"")} {...toolsBtnProps} onClick={()=>setToolsMode('fav')}>お気に入り</button>
+          <button type="button" role="tab" aria-selected={toolsMode==='palette'} className={"wt-seg-btn"+(toolsMode==='palette'?" active":"")} {...toolsBtnProps} onClick={()=>setToolsMode('palette')}>表現パレット</button>
+        </div>
+        <div className="snippet-palette-head-actions">
+          <button type="button" className="btn btn-sm" {...toolsBtnProps} onClick={openDictEditor}>編集</button>
+          <button type="button" className="btn btn-sm btn-ghost" aria-label="道具を閉じる" {...toolsBtnProps} onClick={()=>setToolsOpen(false)}>×</button>
+        </div>
+      </div>
+      {toolsMode==='palette' && toolsSnippetCats.length>0 && (
+        <div className="wt-cats">
+          {toolsSnippetCats.map(cat=>(
+            <button key={cat.id} type="button" className={"snippet-cat-tab"+(toolsActiveCat && toolsActiveCat.id===cat.id ? " active" : "")} {...toolsBtnProps}
+              onClick={()=>setToolsCatId(cat.id)}>{cat.name}</button>
+          ))}
+        </div>
+      )}
+      <div className="snippet-palette-body writing-tools-body">
+        <div className="snippet-palette-buttons">
+          {toolsMode==='fav' && PUNCTUATION_SHORTCUTS.map(it=>(
             <button key={it.key} type="button" className="snippet-btn writing-tools-symbol" {...toolsBtnProps}
               onClick={()=>insertIntoBody(it.text)}>{it.label}</button>
           ))}
-          {pinnedSnippets.map(sn=>(
+          {toolsMode==='fav' && pinnedSnippets.map(sn=>(
             <button key={sn.id} type="button" className="snippet-btn" {...toolsBtnProps}
               onClick={()=>insertIntoBody(sn.text)}>{favLabelOf(sn)}</button>
           ))}
-        </div>
-        <div className="snippet-palette-head-actions">
-          <button type="button" className={"btn btn-sm"+(toolsMenuOpen?" active":"")} aria-expanded={toolsMenuOpen} aria-label="道具のメニューを開閉" {...toolsBtnProps}
-            onClick={()=>setToolsMenuOpen(o=>!o)}>{toolsMenuOpen?'メニュー▲':'メニュー▼'}</button>
-          <button type="button" className="btn btn-sm btn-ghost" aria-label="道具を閉じる" {...toolsBtnProps}
-            onClick={()=>{ setToolsMenuOpen(false); setToolsOpen(false); }}>×</button>
+          {toolsMode==='palette' && toolsCatSnippets.map(sn=>(
+            <button key={sn.id} type="button" className="snippet-btn" {...toolsBtnProps}
+              onClick={()=>insertIntoBody(sn.text)}>{sn.label ? sn.label : sn.text}</button>
+          ))}
+          {toolsMode==='palette' && toolsSnippetCats.length===0 && <span className="wt-empty">表現が未登録です（編集から追加）</span>}
         </div>
       </div>
-      {toolsMenuOpen && (
-        <div className="snippet-palette-body writing-tools-menu">
-          <div className="writing-tools-entries">
-            <button type="button" className="btn btn-sm btn-primary" {...toolsBtnProps} onClick={()=>openDictFromTools('expression')}>📖 辞書から表現を探す</button>
-            <button type="button" className="btn btn-sm" {...toolsBtnProps} onClick={openPaletteFromTools}>表現パレット</button>
-            <button type="button" className="btn btn-sm" {...toolsBtnProps} onClick={()=>openDictFromTools('sceneFlow')}>シーン進行</button>
-            <button type="button" className="btn btn-sm" {...toolsBtnProps} onClick={()=>openDictFromTools('adult')}>成人向け候補</button>
-          </div>
-        </div>
-      )}
     </div>
   ) : null;
 
@@ -6010,7 +6089,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
 
   // 執筆の3区分（下書き／本文／保管棚）。常に同じ並びで表示し、今どこにいるかを明確にする。
   // シーンの地図はAI用の補助機能のため、区分とは別の小さなリンクにする。
-  const switchWritingTab = (tab) => { setPaletteOpen(false); setExprDictOpen(false); setToolsOpen(false); setWritingMoreOpen(false); setWorkspaceTab(tab); };
+  const switchWritingTab = (tab) => { setExprDictOpen(false); setFlowOpen(false); setToolsOpen(false); setWritingMoreOpen(false); setWorkspaceTab(tab); };
   const tabsBar = (
     <div className="writing-seg-wrap">
       <div className="writing-seg" role="tablist" aria-label="執筆の区分">
@@ -6037,9 +6116,9 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
             <span className="wordcount">{draftBody.length.toLocaleString()} 文字</span>
           </div>
           <div className="writing-header-row2">
-            <button type="button" className={"btn btn-sm"+((toolsOpen||paletteOpen||exprDictOpen)?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleTools}>
-              🧰 道具
-            </button>
+            <button type="button" className={"btn btn-sm"+(toolsOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleTools}>🧰 道具</button>
+            <button type="button" className={"btn btn-sm"+(exprDictOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={openDictModal}>📖 辞書</button>
+            <button type="button" className={"btn btn-sm"+(flowOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={openFlowModal}><span className="wh-label-full">シーン進行</span><span className="wh-label-short">進行</span></button>
             <span className="writing-only-desktop"><FontSizeControl value={writingFontSize} onChange={setWritingFontSize} /></span>
             <button type="button" className="btn btn-sm writing-more-btn writing-only-mobile" onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleWritingMore} aria-label="その他の操作" title="その他の操作">⋯</button>
           </div>
@@ -6054,8 +6133,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         </div>
         {toolsBlock}
         {symbolBarBlock}
-        {paletteBlock}
         {exprDictBlock}
+        {flowBlock}
         {dictEditorBlock}
         {exprDictEditorBlock}
         {specialDictEditorBlock}
@@ -6165,7 +6244,9 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
         </div>
         <div className="writing-header-row2" style={{marginBottom:8}}>
           <button className="btn btn-sm" onClick={()=>setFocusMode(true)}><span className="wh-label-full">集中モード</span><span className="wh-label-short">集中</span></button>
-          <button type="button" className={"btn btn-sm"+((toolsOpen||paletteOpen||exprDictOpen)?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleTools}>🧰 道具</button>
+          <button type="button" className={"btn btn-sm"+(toolsOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={toggleTools}>🧰 道具</button>
+          <button type="button" className={"btn btn-sm"+(exprDictOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={openDictModal}>📖 辞書</button>
+          <button type="button" className={"btn btn-sm"+(flowOpen?" active":"")} onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={openFlowModal}><span className="wh-label-full">シーン進行</span><span className="wh-label-short">進行</span></button>
           <button type="button" className="btn btn-sm btn-primary" onClick={openCopyToBody}><span className="wh-label-full">📋 本文へコピー</span><span className="wh-label-short">📋 本文へ</span></button>
           <button type="button" className="btn btn-sm" onClick={()=>setDraftHistoryOpen(true)}>履歴</button>
           <span className="writing-only-desktop"><FontSizeControl value={writingFontSize} onChange={setWritingFontSize} /></span>
@@ -6229,8 +6310,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
       </Modal>}
       {draftToast && <div className="writing-toast"><span>{draftToast}</span>{draftToastAction && <button type="button" className="writing-toast-btn" onClick={()=>{ draftToastAction.fn(); setDraftToast(''); setDraftToastAction(null); }}>{draftToastAction.label}</button>}</div>}
       {copyDlgBlock}
-      {paletteBlock}
       {exprDictBlock}
+      {flowBlock}
       {dictEditorBlock}
       {exprDictEditorBlock}
       {specialDictEditorBlock}
@@ -6306,6 +6387,43 @@ function PunctuationShortcutBar({ onInsert, preventFocusSteal, style }){
 // ---- 表現パレット本体（本文へ即挿入するボタン群） ----
 // ヘッダー行＝カテゴリタブ＋編集/閉じる、本体行＝登録語（横スクロール1段）の2段構成。
 // スマホでは「表現パレット」の大見出しとテキスト長いボタンラベルをCSSで省略する。
+// ---- 執筆画面の共通シート（モーダル）。辞書・シーン進行で共用。背景の執筆画面はスクロールさせず、キーボード分だけ下端を上げる。
+//      閉じるボタンなどのヘッダーは中身（.wsheet-pane内）で固定し、内容部分だけをスクロールさせる。 ----
+function WritingSheet({ onClose, bottomInset, hidden, label, children }){
+  useEffect(()=>{
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return ()=>{ document.body.style.overflow = prev; };
+  }, []);
+  return (
+    <div className="wsheet-backdrop" role="dialog" aria-modal="true" aria-label={label}
+      style={{ bottom:(bottomInset||0)+'px', display: hidden ? 'none' : undefined }}>
+      <div className="wsheet">{children}</div>
+    </div>
+  );
+}
+// シート内の編集ペイン：「← 閲覧へ」「×」を固定ヘッダーに置き、編集内容だけをスクロールさせる。
+// 入力があった（検索欄を除く）場合はdirtyRefを立て、閉じる側で確認できるようにする。
+function WritingSheetEditPane({ title, onBack, onClose, dirtyRef, children }){
+  const onInput = (e) => {
+    const t = e.target;
+    if(!dirtyRef || !t) return;
+    if(t.tagName!=='TEXTAREA' && t.tagName!=='INPUT') return;
+    if(t.type==='search' || /検索/.test(t.placeholder||'')) return;
+    dirtyRef.current = true;
+  };
+  return (
+    <div className="wsheet-pane" onInput={onInput}>
+      <div className="wsheet-head">
+        <span className="wsheet-title">{title}</span>
+        <button type="button" className="btn btn-sm" style={{whiteSpace:'nowrap'}} onClick={onBack}>← 閲覧へ</button>
+        <button type="button" className="btn btn-sm btn-ghost" aria-label="閉じる" onClick={onClose}>×</button>
+      </div>
+      <div className="wsheet-body">{children}</div>
+    </div>
+  );
+}
+
 function SnippetPalette({ categories, snippets, onInsert, onOpenEditor, onClose, preventFocusSteal, style }){
   const sortedCats = [...categories].sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0));
   const snippetsOf = (catId) => snippets.filter(s=>s.categoryId===catId).sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0));
@@ -6425,8 +6543,6 @@ function DictTabSwitch({ active, onChange, preventFocusSteal }){
         onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('adult')}>成人向け表現</button>
       <button type="button" className={"dict-tab-btn"+(active==='onomatopoeia'?' active':'')}
         onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('onomatopoeia')}>オノマトペ</button>
-      <button type="button" className={"dict-tab-btn"+(active==='sceneFlow'?' active':'')}
-        onMouseDown={preventFocusSteal} onPointerDown={preventFocusSteal} onClick={()=>onChange('sceneFlow')}>シーン進行</button>
     </div>
   );
 }
@@ -7208,9 +7324,11 @@ function OnomatopoeiaPanel({ dictionary, onOpenEditor, onClose, onInsert, preven
 // ---- 濡れ場の進行表（参照パネル）。下書き中に、保存済みの進行表（行為カードの並び）を開いて見るためだけの閲覧用。
 //      本文・下書きへの自動挿入は行わない（カードのコピーのみ）。管理（追加・並べ替え・削除）は「成人向け創作」の
 //      シーン進行タブで行う。データはadultSceneFlow.plansとして保持し、既存のitems/phases/selectedItemIdsとは独立。 ----
-function SceneFlowReferencePanel({ plans, onOpenEditor, onClose, onBack, onInsert, preventFocusSteal, style }){
+function SceneFlowReferencePanel({ plans, onOpenEditor, onClose, onBack, onInsert, preventFocusSteal, style, activeId: activeIdProp, onActiveChange }){
   plans = plans || [];
-  const [activeId, setActiveId] = useState(plans[0] ? plans[0].id : '');
+  const [localActiveId, setLocalActiveId] = useState(plans[0] ? plans[0].id : '');
+  const activeId = activeIdProp ? activeIdProp : localActiveId; // 親が保持していればそれを使う（編集から戻っても同じプランを開く）
+  const setActiveId = (id) => { setLocalActiveId(id); if(onActiveChange) onActiveChange(id); };
   const [toast, setToast] = useState('');
   const toastTimerRef = useRef(null);
   useEffect(()=>()=>{ if(toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
@@ -9216,11 +9334,12 @@ function AdultSceneFlowTab({appData,setAppData,data,setData,onInsertToDraft}){
 //      シーン全体には任意入力の「開始前の状態」「終了後の状態」だけを置ける。複数保存し、下書きから参照・挿入できる。
 //      全年齢・成人向けはkind('general'|'adult')で区別するだけで、データ構造・操作方法は完全に同じ。
 //      data/setDataはアプリ本体のトップレベルdata（sceneFlowPlansを持つ）を受け取る。
-function SceneFlowPlansEditor({data,setData,kindFilter,defaultKind,allowKindSwitch,adultLibrary,onInsertToDraft,insertLabel}){
+function SceneFlowPlansEditor({data,setData,kindFilter,defaultKind,allowKindSwitch,adultLibrary,onInsertToDraft,insertLabel,initialActiveId,onActiveChange}){
   const allPlans = data.sceneFlowPlans||[];
   const plans = kindFilter && kindFilter!=='all' ? allPlans.filter(p=>p.kind===kindFilter) : allPlans;
-  const [activeId,setActiveId]=useState(plans[0]?plans[0].id:'');
+  const [activeId,setActiveId]=useState((initialActiveId && plans.some(p=>p.id===initialActiveId)) ? initialActiveId : (plans[0]?plans[0].id:''));
   const active = allPlans.find(p=>p.id===activeId) || plans[0] || null;
+  useEffect(()=>{ if(onActiveChange && active) onActiveChange(active.id); },[active&&active.id]); // 親（執筆画面）と選択中プランを共有する
   const [cardDraft,setCardDraft]=useState(null); // {cardId, name, memo}
   const [candidateOpen,setCandidateOpen]=useState(false);
   const [candidateQuery,setCandidateQuery]=useState('');
@@ -10504,7 +10623,7 @@ function App(){
   } else if(screen==='storyTools'){
     body = <StoryToolsScreen data={data} setData={setData} outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} openSceneSignal={sceneToolsSignal} />;
   } else if(screen==='writing'){
-    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} adultDictionary={adultDictionary} adultOnomatopoeia={adultOnomatopoeia} adultSceneFlow={adultSceneFlow} onOpenAdultTools={openAdultTools} onOpenSceneFlowScreen={openSceneFlowScreen} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} openId={writingOpenId} setOpenId={setWritingOpenId} activeBlockId={writingBlockId} setActiveBlockId={setWritingBlockId} backRef={writingBackRef} />;
+    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} onOpenAdultTools={openAdultTools} onOpenSceneFlowScreen={openSceneFlowScreen} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} openId={writingOpenId} setOpenId={setWritingOpenId} activeBlockId={writingBlockId} setActiveBlockId={setWritingBlockId} backRef={writingBackRef} />;
   } else if(screen==='aiimport'){
     body = <AiImportScreen data={data} setData={setData} lastImportBackup={lastImportBackup} setLastImportBackup={setLastImportBackup} />;
   } else if(screen==='adultTools'){
