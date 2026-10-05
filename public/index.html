@@ -929,6 +929,7 @@ const NAV_ITEMS = [
   { key:'timeline', label:'年表', icon:'📜' },
   { key:'ideas', label:'ネタ箱', icon:'💡' },
   { key:'plot', label:'プロット', icon:'🧩' },
+  { key:'plotOld', label:'旧プロット', icon:'🗂' },
   { key:'storyTools', label:'シーン・物語設計', icon:'🎬' },
   { key:'sceneFlow', label:'シーン進行', icon:'🧵' },
   { key:'writing', label:'執筆', icon:'✍️' },
@@ -951,14 +952,14 @@ const MOBILE_TAB_ITEMS = [
 const SETTINGS_SCREEN_KEYS = ['characters','organizations','locations','worldsettings','timeline','ideas'];
 // 「その他」ボトムシートに表示する画面（NAV_ITEMSのラベル/アイコンをそのまま流用）
 // 全体構成・物語設計（storyTools）・シーン進行・一括取り込み・成人向け創作。バックアップ／クラウド同期はシート内の専用ボタン。
-const MORE_SCREEN_KEYS = ['storyTools','sceneFlow','aiimport','adultTools'];
+const MORE_SCREEN_KEYS = ['plotOld','storyTools','sceneFlow','aiimport','adultTools'];
 const isMoreScreen = (screen) => MORE_SCREEN_KEYS.includes(screen);
 const isSettingsScreen = (screen) => screen==='settingsHub' || SETTINGS_SCREEN_KEYS.includes(screen);
 // 画面の戻る操作＝一つ上の階層へ。親が無い画面（ホーム）は戻る先が無い（ブラウザ／端末の戻るへ委ねる）。
 const SCREEN_PARENT = {
   settingsHub:'dashboard', writing:'dashboard', plot:'dashboard',
   characters:'settingsHub', organizations:'settingsHub', locations:'settingsHub', worldsettings:'settingsHub', timeline:'settingsHub', ideas:'settingsHub',
-  storyTools:'dashboard', sceneFlow:'dashboard', aiimport:'dashboard', adultTools:'dashboard',
+  plotOld:'dashboard', storyTools:'dashboard', sceneFlow:'dashboard', aiimport:'dashboard', adultTools:'dashboard',
 };
 const SCREEN_PARENT_LABEL = { dashboard:'ホーム', settingsHub:'設定' };
 
@@ -1981,6 +1982,7 @@ function initialData(){
     timeline: [],
     ideas: [],
     plot: { structureType: '自由構成', chapters: [] },
+    plotV2: emptyPlotV2(), // 新プロット（旧plotとは別。plotV2が無い旧データは空の新プロットとして扱う）
     writings: [],
     drafts: [],
     activeDraftId: null,
@@ -2191,6 +2193,7 @@ function migrateData(parsed){
     org.memberIds = [];
   });
 
+  migratePlotV2(parsed); // 新プロット（plotV2）の検証。無ければ空、不正なら空で上書きせず原本を保持する
   return parsed;
 }
 
@@ -5326,7 +5329,7 @@ function Plot({ data, setData, allChars, allLocations }){
 
   return (
     <div>
-      <h1>🧩 プロット</h1>
+      <h1>🗂 旧プロット</h1>
       <div className="field-row" style={{maxWidth:280}}>
         <label>構成方式（章に付けられるラベルの候補が切り替わります）</label>
         <select value={plot.structureType} onChange={e=>changeStructureType(e.target.value)}>
@@ -10175,7 +10178,8 @@ function Dashboard({ data, setScreen }){
           if(n.key==='worldsettings') count = data.worldSettings.filter(c=>c.cards.length>0).length;
           if(n.key==='timeline') count = data.timeline.length;
           if(n.key==='ideas') count = data.ideas.length;
-          if(n.key==='plot') count = data.plot.chapters.length;
+          if(n.key==='plot') count = plotV2CountAll(data.plotV2);
+          if(n.key==='plotOld') count = data.plot.chapters.length;
           if(n.key==='writing') count = data.writings.length;
           return (
             <button key={n.key} className="dash-nav-item" onClick={()=>setScreen(n.key)}>
@@ -10244,6 +10248,1015 @@ function CloudSyncModal({ syncConfig, setSyncConfig, syncState, onConnect, onPul
       <p className="sync-note">本文・設定・辞典・シーン設計を同期します。画像は容量が大きいため現在は端末内保存です。更新番号が食い違った場合は自動上書きを止めます。</p>
     </div>
   </Modal>;
+}
+
+/* ============ 新プロット（plotV2）：データ構造・検証・木の操作 ============
+   data.plotV2 = { schemaVersion:1, items:[ツリー], structures:[構成設定] }
+   ・items：配列順＝読者に見せる順番。まとまり(group)は children を持ち、出来事(event)は末端。IDは固定（編集・移動で変えない）。
+   ・structures：各まとまりごとの構成設定。端点は出来事IDで持ち、範囲は「対象まとまり内の出来事を表示順にたどって」解釈する。
+   ・旧 data.plot（旧プロット）とは完全に別。旧データから新プロットへの自動変換・自動紐付けは行わない。
+   ・形式が不正／未対応バージョンのデータは空で上書きしない（validatePlotV2 が失敗を返し、呼び出し側が原本を保持する）。 */
+const PLOTV2_VERSION = 1;
+const PLOTV2_UI_KEY = 'novel-world-builder-plotv2-ui-v1'; // 端末内の表示設定（作品データ・バックアップ・クラウド同期には含めない）
+const PLOTV2_MAX_DEPTH = 100;
+const PLOTV2_ROLE_COLORS = ['#c8553d','#2f73a3','#8a5fb0','#3b3f5c','#2f8f74','#b07a1f','#a03a6a','#5f7a2f'];
+const PLOTV2_SCENE_KEYS = ['goal','obstacle','change','memo'];
+
+function emptyPlotV2(){ return { schemaVersion:PLOTV2_VERSION, items:[], structures:[] }; }
+
+function plotV2Fail(message){ return { ok:false, message }; }
+function plotV2Str(o, k, path){
+  const v = o[k];
+  if(v===undefined || v===null) return '';
+  if(typeof v !== 'string') throw new Error(`${path}.${k} が文字列ではありません`);
+  return v;
+}
+function plotV2IdList(o, k, path){
+  const v = o[k];
+  if(v===undefined || v===null) return [];
+  if(!Array.isArray(v)) throw new Error(`${path}.${k} が配列ではありません`);
+  v.forEach((x,i)=>{ if(typeof x !== 'string') throw new Error(`${path}.${k}[${i}] が文字列ではありません`); });
+  return v.slice();
+}
+// 検証＋正規化。成功時は { ok:true, value }（ID・並び・入れ子・文章・関連ID・構成端点をそのまま保つ）。失敗時は { ok:false, message }。
+function validatePlotV2(raw){
+  try{
+    if(!raw || typeof raw!=='object' || Array.isArray(raw)) return plotV2Fail('新プロットのデータがオブジェクトではありません。');
+    if(raw.schemaVersion !== PLOTV2_VERSION) return plotV2Fail(`未対応のバージョンです（schemaVersion: ${JSON.stringify(raw.schemaVersion)}）。このアプリが扱えるのは ${PLOTV2_VERSION} です。`);
+    if(!Array.isArray(raw.items)) return plotV2Fail('items が配列ではありません。');
+    if(raw.structures!==undefined && raw.structures!==null && !Array.isArray(raw.structures)) return plotV2Fail('structures が配列ではありません。');
+    const ids = new Set();
+    const useId = (n, path) => {
+      if(typeof n.id !== 'string' || !n.id) throw new Error(`${path} のIDがありません`);
+      if(ids.has(n.id)) throw new Error(`${path} のIDが重複しています（${n.id}）`);
+      ids.add(n.id);
+    };
+    const walk = (list, path, depth) => {
+      if(depth > PLOTV2_MAX_DEPTH) throw new Error('入れ子が深すぎます');
+      return list.map((n, i) => {
+        const p = `${path}[${i}]`;
+        if(!n || typeof n!=='object' || Array.isArray(n)) throw new Error(`${p} がオブジェクトではありません`);
+        useId(n, p);
+        if(n.kind === 'group'){
+          if(n.children!==undefined && n.children!==null && !Array.isArray(n.children)) throw new Error(`${p}.children が配列ではありません`);
+          return { id:n.id, kind:'group', label:plotV2Str(n,'label',p), title:plotV2Str(n,'title',p), summary:plotV2Str(n,'summary',p),
+            children: walk(n.children||[], `${p}.children`, depth+1) };
+        }
+        if(n.kind === 'event'){
+          if(Array.isArray(n.children) ? n.children.length>0 : (n.children!==undefined && n.children!==null)) throw new Error(`${p} は出来事ですが子を持っています`);
+          const sc = n.scene;
+          if(sc!==undefined && sc!==null && (typeof sc!=='object' || Array.isArray(sc))) throw new Error(`${p}.scene がオブジェクトではありません`);
+          const scene = {}; PLOTV2_SCENE_KEYS.forEach(k => { scene[k] = plotV2Str(sc||{}, k, `${p}.scene`); });
+          return { id:n.id, kind:'event', title:plotV2Str(n,'title',p), summary:plotV2Str(n,'summary',p), detail:plotV2Str(n,'detail',p),
+            chars:plotV2IdList(n,'chars',p), places:plotV2IdList(n,'places',p), scene };
+        }
+        throw new Error(`${p}.kind が group / event のどちらでもありません`);
+      });
+    };
+    const items = walk(raw.items, 'items', 0);
+    const stIds = new Set(), roleIds = new Set();
+    const structures = (raw.structures||[]).map((s, i) => {
+      const p = `structures[${i}]`;
+      if(!s || typeof s!=='object' || Array.isArray(s)) throw new Error(`${p} がオブジェクトではありません`);
+      if(typeof s.id!=='string' || !s.id) throw new Error(`${p} のIDがありません`);
+      if(stIds.has(s.id)) throw new Error(`${p} のIDが重複しています`);
+      stIds.add(s.id);
+      if(typeof s.groupId!=='string') throw new Error(`${p}.groupId が文字列ではありません`);
+      if(s.roles!==undefined && s.roles!==null && !Array.isArray(s.roles)) throw new Error(`${p}.roles が配列ではありません`);
+      const roles = (s.roles||[]).map((r, j) => {
+        const q = `${p}.roles[${j}]`;
+        if(!r || typeof r!=='object' || Array.isArray(r)) throw new Error(`${q} がオブジェクトではありません`);
+        if(typeof r.id!=='string' || !r.id) throw new Error(`${q} のIDがありません`);
+        if(roleIds.has(r.id)) throw new Error(`${q} のIDが重複しています`);
+        roleIds.add(r.id);
+        return { id:r.id, name:plotV2Str(r,'name',q), color:plotV2Str(r,'color',q) || PLOTV2_ROLE_COLORS[j % PLOTV2_ROLE_COLORS.length],
+          startId:plotV2Str(r,'startId',q), endId:plotV2Str(r,'endId',q) };
+      });
+      return { id:s.id, groupId:s.groupId, type:plotV2Str(s,'type',p), roles };
+    });
+    return { ok:true, value:{ schemaVersion:PLOTV2_VERSION, items, structures } };
+  }catch(e){
+    return plotV2Fail('新プロットのデータの形式が不正です：' + (e && e.message ? e.message : String(e)));
+  }
+}
+// バックアップ／クラウドの取り込み前チェック。plotV2 が無い（旧形式）ならOK（空として扱う）。存在して不正ならエラー文を返す。
+function plotV2PayloadError(dataObj){
+  if(!dataObj || typeof dataObj!=='object') return null;
+  if(dataObj.plotV2===undefined || dataObj.plotV2===null) return null;
+  const r = validatePlotV2(dataObj.plotV2);
+  return r.ok ? null : r.message;
+}
+// migrateData から呼ぶ。plotV2 が無ければ空。不正なら空にはせず、原本を plotV2Error.raw に退避してエラーを立てる（保存・書き出し時は原本を書き戻す）。
+function migratePlotV2(parsed){
+  const raw = parsed.plotV2;
+  delete parsed.plotV2Error;
+  if(raw===undefined || raw===null){ parsed.plotV2 = emptyPlotV2(); return parsed; }
+  const r = validatePlotV2(raw);
+  if(r.ok){ parsed.plotV2 = r.value; }
+  else { parsed.plotV2 = emptyPlotV2(); parsed.plotV2Error = { message:r.message, raw }; }
+  return parsed;
+}
+// 保存・書き出し用：不正データの原本を持っている間は、空の新プロットではなく原本を書き戻す（破損状態を確定させない）。
+function serializableData(d){
+  if(d && d.plotV2Error){
+    const { plotV2Error, ...rest } = d;
+    return { ...rest, plotV2: plotV2Error.raw };
+  }
+  return d;
+}
+function plotV2CountAll(plot){
+  let n = 0;
+  const walk = (list) => (list||[]).forEach(x => { n++; if(x.kind==='group') walk(x.children); });
+  walk(plot && plot.items);
+  return n;
+}
+
+/* ---- 木の基本操作（itemsを明示的に受け取る。移動・並べ替えはitemsを直接書き換える） ---- */
+function pvFind(items, id, list, parent, depth){
+  list = list || items; parent = parent || null; depth = depth || 0;
+  for(let i = 0; i < list.length; i++){
+    const n = list[i];
+    if(n.id === id) return { node:n, list, index:i, parent, depth };
+    if(n.kind === 'group'){ const r = pvFind(items, id, n.children, n, depth + 1); if(r) return r; }
+  }
+  return null;
+}
+function pvSelfOrDesc(root, id){
+  if(root.id === id) return true;
+  return root.kind === 'group' && root.children.some(c => pvSelfOrDesc(c, id));
+}
+function pvCountAll(n){ return n.kind === 'group' ? n.children.reduce((a,c)=>a + 1 + pvCountAll(c), 0) : 0; }
+function pvForEach(items, fn){ items.forEach(n => { fn(n); if(n.kind === 'group') pvForEach(n.children, fn); }); }
+function pvListOf(items, parentId){ if(!parentId) return items; const i = pvFind(items, parentId); return i && i.node.kind === 'group' ? i.node.children : null; }
+function pvCanMove(items, id, destId){
+  if(destId === null) return !!pvFind(items, id);
+  const info = pvFind(items, id), d = pvFind(items, destId);
+  if(!info || !d || d.node.kind !== 'group') return false;
+  return !pvSelfOrDesc(info.node, destId);
+}
+function pvMove(items, id, destId){ // 移動先の末尾へ
+  if(!pvCanMove(items, id, destId)) return false;
+  const info = pvFind(items, id); if(!info) return false;
+  info.list.splice(info.index, 1);
+  pvListOf(items, destId).push(info.node);
+  return true;
+}
+function pvShift(items, id, dir){ // 同じ親の中で一つ入れ替える（所属・階層は変えない）
+  const info = pvFind(items, id); if(!info) return false;
+  const j = info.index + dir; if(j < 0 || j >= info.list.length) return false;
+  const [n] = info.list.splice(info.index, 1); info.list.splice(j, 0, n);
+  return true;
+}
+function pvMakeGroup(label, title, summary){ return { id:uid('pvg'), kind:'group', label:label||'', title:title||'', summary:summary||'', children:[] }; }
+function pvMakeEvent(title, summary){
+  return { id:uid('pve'), kind:'event', title:title||'', summary:summary||'', detail:'', chars:[], places:[], scene:{ goal:'', obstacle:'', change:'', memo:'' } };
+}
+function pvPlain(n){ return (n.kind === 'group' ? [n.label, n.title].filter(x=>x&&x.trim()).join(' ') : n.title) || '未定'; }
+
+/* ---- 構成：対象まとまり内の出来事を表示順に並べ、端点IDの位置で範囲を決める ---- */
+function pvGroupFlat(items, groupId){
+  const g = pvFind(items, groupId), flat = [];
+  if(!g || g.node.kind !== 'group') return null; // 対象のまとまりが無い
+  const walk = (list, parent) => list.forEach(n => { if(n.kind === 'group') walk(n.children, n); else flat.push({ node:n, parent }); });
+  walk(g.node.children, g.node);
+  return flat;
+}
+// 役割の状態：{s:'unset'} | {s:'ok',a,b,count} | {s:'check',reason}。flat が null のときは対象まとまりが削除済み。
+function pvRoleStatus(items, r, flat){
+  if(!r.startId && !r.endId) return { s:'unset' };
+  if(!flat) return { s:'check', reason:'対象のまとまりが削除されています' };
+  const endpoint = (id, name) => {
+    if(!id) return `${name}が未設定です`;
+    if(flat.some(x => x.node.id === id)) return '';
+    return pvFind(items, id) ? `${name}の出来事が対象のまとまりの外へ移動しています` : `${name}の出来事が削除されています`;
+  };
+  const e1 = endpoint(r.startId, '始点'), e2 = endpoint(r.endId, '終点');
+  if(e1 || e2) return { s:'check', reason:[e1, e2].filter(Boolean).join('／') };
+  const a = flat.findIndex(x => x.node.id === r.startId), b = flat.findIndex(x => x.node.id === r.endId);
+  if(a > b) return { s:'check', reason:'始点と終点の順序が逆です' };
+  return { s:'ok', a, b, count:b - a + 1 };
+}
+// 出来事ID → 帯の情報。bandGroupIds に含まれるまとまりの構成だけを対象にする。範囲が重なる場合は先の役割を優先。
+function pvBuildStMap(plot, bandGroupIds){
+  const map = {};
+  plot.structures.forEach(s => {
+    if(!bandGroupIds.has(s.groupId)) return;
+    const flat = pvGroupFlat(plot.items, s.groupId); if(!flat) return;
+    s.roles.forEach(r => {
+      const st = pvRoleStatus(plot.items, r, flat); if(st.s !== 'ok') return;
+      for(let i = st.a; i <= st.b; i++){
+        const id = flat[i].node.id; if(map[id]) continue;
+        const prevSame = i > st.a && map[flat[i-1].node.id] && map[flat[i-1].node.id].role === r;
+        const chapterChanged = prevSame && flat[i-1].parent !== flat[i].parent;
+        map[id] = { role:r, label: !prevSame || chapterChanged, cont: chapterChanged };
+      }
+    });
+  });
+  return map;
+}
+// 要確認の一覧（プロット上部で確認・解除するための材料）。構成設定の自動削除・端点の自動置換はしない。
+function pvCheckList(plot){
+  const out = [];
+  plot.structures.forEach(s => {
+    const flat = pvGroupFlat(plot.items, s.groupId);
+    if(!flat){ out.push({ st:s, role:null, orphan:true, reason:'対象のまとまりが削除されています' }); return; }
+    s.roles.forEach(r => { const x = pvRoleStatus(plot.items, r, flat); if(x.s === 'check') out.push({ st:s, role:r, orphan:false, reason:x.reason }); });
+  });
+  return out;
+}
+
+/* ---- 端末内の表示設定（カード/ライン・通常時の開閉・構成帯の表示）。作品データとは別保存 ---- */
+function loadPlotV2Ui(){
+  const def = { view:'card', col:{}, ev:{}, sc:{}, st:{} };
+  try{
+    const o = JSON.parse(localStorage.getItem(PLOTV2_UI_KEY) || 'null');
+    if(!o || typeof o!=='object') return def;
+    const m = (x) => (x && typeof x==='object' && !Array.isArray(x)) ? x : {};
+    return { view:o.view==='line'?'line':'card', col:m(o.col), ev:m(o.ev), sc:m(o.sc), st:m(o.st) };
+  }catch(e){ return def; }
+}
+function savePlotV2Ui(ui, items){
+  try{
+    const alive = new Set(); pvForEach(items, n => alive.add(n.id));
+    const keep = (o) => { const r = {}; Object.keys(o).forEach(k => { if(alive.has(k) && o[k]) r[k] = true; }); return r; };
+    localStorage.setItem(PLOTV2_UI_KEY, JSON.stringify({ view:ui.view, col:keep(ui.col), ev:keep(ui.ev), sc:keep(ui.sc), st:keep(ui.st) }));
+  }catch(e){}
+}
+
+const PLOTV2_CSS = String.raw`
+  :host{ display:block; } .pv{ --ink:#2b2a27; --ink-soft:#6b665c; --teal:#1f7a63; --teal-soft:#a8d5c3; --purple:#6b4fa0; --danger:#8a3a3a; }
+  *{ box-sizing:border-box; }
+    [hidden]{ display:none !important; }
+  .pv{ background:var(--bg); color:var(--ink); font-family:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",sans-serif; font-size:14px; line-height:1.5; border-radius:12px; overflow-x:clip; }
+  .pv.v-card{ --bg:#f6faf7; --gap:6px; }
+  .pv.v-line{ --bg:#ffffff; --gap:3px; }
+  button{ font:inherit; color:inherit; cursor:pointer; }
+  input,textarea,select{ color:var(--ink); }
+  .wrap{ max-width:820px; margin:0 auto; padding:12px 10px 80px; }
+  .pv h1{ font-family:"Hiragino Mincho ProN","Yu Mincho",serif; font-size:20px; margin:2px 0 6px; }
+  .notice{ background:#fff3d6; border:1px solid #e2c985; border-radius:8px; padding:6px 10px; font-size:12px; margin-bottom:8px; }
+  .linenote{ display:none; background:#eef6f1; border:1px solid #cfe4d8; border-radius:8px; padding:6px 10px; font-size:12px; margin-bottom:8px; }
+  .v-line .linenote{ display:block; }
+  .btn{ border:1px solid #bdb6a6; background:#fff; border-radius:14px; padding:5px 12px; font-size:13px; min-height:34px; }
+  .btn:active{ background:#eee8d8; }
+  .btn.primary{ background:#3b3f5c; color:#fff; border-color:#3b3f5c; }
+  .btn.danger{ color:var(--danger); border-color:#dbb; }
+  .btn:disabled{ opacity:.35; cursor:default; }
+  .toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:6px 0 10px; }
+  .seg{ display:inline-flex; border:1px solid #bdb6a6; border-radius:999px; overflow:hidden; background:#fff; margin-right:6px; }
+  .seg button{ border:none; background:transparent; padding:0 14px; min-height:34px; font-size:13px; }
+  .seg button[aria-pressed="true"]{ background:#3b3f5c; color:#fff; font-weight:700; }
+
+  /* 文字リンク風の操作（枠・塗りなし。小さく見えてもタップ領域は高さ36〜40px） */
+  .lnk{ border:none; background:none; color:var(--teal); font-size:13px; font-weight:600; padding:0 6px; min-height:40px; display:inline-flex; align-items:center; gap:2px; border-radius:8px; white-space:nowrap; }
+  .lnk:active{ background:rgba(31,122,99,.12); }
+  .lnk.sm{ min-height:36px; font-size:12px; }
+  .lnk[aria-pressed="true"]{ text-decoration:underline; text-underline-offset:4px; }
+
+  /* 共通の骨格（色・枠・線は下の表示別ルールで切り替える） */
+  .card{ min-width:0; }
+  .tog{ flex:0 0 auto; width:32px; height:32px; border:none; background:transparent; color:#55705f; font-size:13px; padding:0; line-height:1; border-radius:8px; }
+  .tog:active{ background:rgba(0,0,0,.07); }
+  .ghead,.ehead{ display:flex; align-items:flex-start; gap:6px; position:relative; }
+  .gleft{ flex:0 0 auto; display:flex; align-items:center; gap:2px; max-width:40%; }
+    .gright, .emain{ flex:1 1 auto; min-width:0; padding:3px 0 0; }
+    .gact{ flex:0 0 auto; }
+  .ttl{ font-weight:700; font-size:16px; line-height:1.4; overflow-wrap:anywhere; word-break:normal; }
+  .sum{ font-size:12px; color:var(--ink-soft); overflow-wrap:anywhere; margin-top:1px; }
+  .cnt{ font-size:11px; color:var(--ink-soft); font-weight:400; margin-left:6px; white-space:nowrap; }
+  .gbody{ margin-top:var(--gap); }
+  .list-stack > * + *{ margin-top:var(--gap); }
+  .emptyg{ font-size:12px; color:var(--ink-soft); padding:2px 8px; }
+
+  /* 展開した出来事の中身：概要・キャラ・場所は囲み箱にせず、文字と丸い画像で並べる */
+  .edetail{ margin-top:2px; padding-left:38px; }
+  .dtext{ white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; }
+  .dtext.none{ color:var(--ink-soft); }
+  .rline{ display:flex; flex-wrap:wrap; align-items:center; gap:2px 12px; margin-top:4px; }
+  .ppl{ display:inline-flex; align-items:center; gap:6px; font-size:13px; min-width:0; }
+  .av{ width:28px; height:28px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:15px; color:#fff; flex:0 0 auto; line-height:1; }
+  .av.place{ background:#dfe8e2; color:#3f5a4d; }
+  .pname{ overflow-wrap:anywhere; }
+  .none-txt{ font-size:12px; color:var(--ink-soft); }
+  .scsum{ margin-top:6px; font-size:12px; border-left:2px solid var(--teal-soft); padding-left:8px; color:#4a463d; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+  .scsum b{ font-weight:700; color:var(--ink-soft); margin-right:4px; }
+
+  /* 構成：帯（細い色）とラベルだけに色を使う */
+  .event.st{ --stc:#999; }
+  .event.st::before{ content:''; position:absolute; width:4px; background:var(--stc); }
+  .strow{ display:flex; align-items:center; gap:6px; margin-bottom:2px; }
+  .stl{ border:none; color:#fff; border-radius:10px; padding:2px 12px; font-size:12px; font-weight:700; min-height:28px; }
+  .stcont{ font-size:11px; color:var(--ink-soft); }
+  .strbar{ display:flex; flex-wrap:wrap; gap:0 8px; align-items:center; padding:0 4px; }
+  .stchip{ border:none; border-bottom:2px solid var(--stc,#bdb6a6); background:transparent; padding:0 4px; font-size:12px; min-height:34px; }
+  .stchip.warn{ border-bottom-color:var(--danger); color:var(--danger); font-weight:700; }
+  .stunset{ display:inline-flex; align-items:center; gap:0; font-size:12px; color:var(--ink-soft); }
+
+  /* ===== B：淡いカード ===== */
+  .v-card .card{ border:1px solid transparent; }
+  .v-card .group{ background:#e6f3ec; border-radius:18px; padding:6px 10px 10px; }
+  .v-card .gbody .group{ background:#fafdfb; border-radius:14px; padding:4px 8px 8px; }
+  .v-card .gbody .group.even{ background:#e6f3ec; }
+  .v-card .gbody .group.deep2{ padding:3px 5px 6px; }
+  .v-card .event{ position:relative; background:#fdf5e1; border-radius:12px; padding:4px 10px 8px; }
+  .v-card .event.st::before{ left:0; top:8px; bottom:8px; border-radius:0 3px 3px 0; }
+  .v-card .endcap{ background:#e6e9ec; border-radius:12px; padding:8px 14px; font-weight:600; font-size:14px; color:#4a5560; letter-spacing:.12em; }
+  .v-card .trunk > .list-stack{ margin:10px 0; }
+  .v-card .addbtn{ padding:0 6px; }
+
+  /* ===== C：縦の流れ（左の細い線＝読者に見せる順番と所属。構成の帯は右端） ===== */
+  .v-line .trunk{ position:relative; padding-left:18px; }
+  .v-line .trunk::before{ content:''; position:absolute; left:5.5px; top:15px; bottom:15px; width:2px; background:var(--teal-soft); }
+  .v-line .trunk > .list-stack{ margin:4px 0; }
+  .v-line .list-stack.nest{ position:relative; padding-left:var(--P,18px); }
+  .v-line .list-stack.deep{ --P:12px; }
+  .v-line .list-stack.nest::before{ content:''; position:absolute; left:calc(var(--P,18px) - 12.25px); top:0; bottom:20px; width:1.5px; background:#c3e3d5; }
+  .v-line .list-stack.nest::after{ content:''; position:absolute; left:-11.5px; top:0; width:var(--P,18px); height:1.5px; background:#c3e3d5; }
+  .v-line .card{ border:none; background:none; border-radius:0; padding:0 8px; }
+  .v-line .event{ position:relative; padding:2px 8px; border-radius:10px; --dw:9px; --dc:#4aa88a; }
+  .v-line .event.isopen{ background:#ecf6f0; padding-bottom:6px; box-shadow:inset 2px 0 0 var(--teal-soft); }
+  .v-line .group{ --dw:10px; --dc:#3a9a7f; }
+  .v-line .list-stack.top > .group{ --dw:11px; --dc:#2f8f74; }
+  .v-line .ehead::before,.v-line .ghead::before{ content:''; position:absolute; left:calc(-19.5px - var(--dw) / 2); top:calc(16px - var(--dw) / 2); width:var(--dw); height:var(--dw); border-radius:50%; background:#fff; border:1.5px solid var(--dc); }
+  .v-line .gbody{ margin:0 -8px; }
+  .v-line .strbar{ padding-left:26px; }
+  .v-line .event.st{ padding-right:14px; }
+  .v-line .event.st::before{ right:0; top:4px; bottom:4px; border-radius:3px 0 0 3px; }
+  .v-line .strow{ justify-content:flex-end; }
+  .v-line .endcap{ position:relative; padding:4px 8px; font-weight:600; font-size:14px; color:var(--ink-soft); letter-spacing:.12em; }
+  .v-line .endcap::before{ border:none; }
+  .v-line .endcap::before{ content:''; position:absolute; left:-17px; top:50%; width:10px; height:10px; margin-top:-5px; border-radius:50%; background:#2f8f74; }
+  .v-line .addbtn{ position:relative; padding:0 8px; }
+  .v-line .addbtn::before{ content:''; position:absolute; left:-14.5px; top:50%; width:7px; height:7px; margin-top:-3.5px; border-radius:50%; background:#fff; border:1.5px solid var(--teal-soft); }
+  .v-line .edetail{ padding-left:38px; }
+
+  .addbtn{ display:inline-flex; }
+  .addrow{ display:flex; align-items:center; justify-content:space-between; }
+  .erow{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; margin-top:2px; }
+
+  /* 直接編集：普段は文章に見せ、フォーカス中だけ薄い背景と枠で編集箇所を示す */
+  .inl{ display:block; width:calc(100% + 8px); margin:0 -4px; padding:2px 4px; font:inherit; color:inherit; background:transparent; border:none; border-radius:6px; outline:none; resize:none; overflow:hidden; box-shadow:0 0 0 1.5px transparent; cursor:text; }
+  .inl::placeholder{ color:#aaa597; font-weight:400; }
+  .inl:focus{ background:rgba(31,122,99,.07); box-shadow:0 0 0 1.5px var(--teal-soft); }
+  .inl.t{ font-size:16px; font-weight:700; line-height:1.4; text-overflow:ellipsis; }
+  .inl.s{ font-size:12px; color:var(--ink-soft); line-height:1.5; }
+  .inl.d{ font-size:14px; line-height:1.5; }
+  .inl.lb{ width:4.2em; max-width:100%; margin:0; font-size:13px; font-weight:700; color:#3f6a55; min-height:32px; line-height:1.4; }
+  .trow{ display:flex; align-items:center; gap:4px; }
+  .trow .inl{ width:auto; flex:1 1 auto; min-width:0; margin:0 0 0 -4px; }
+  .scene{ margin-top:6px; padding-left:8px; border-left:2px solid var(--teal-soft); }
+  .sf + .sf{ margin-top:4px; }
+  .sf .sl{ font-size:11px; color:var(--ink-soft); }
+
+  /* ===== 移動モード ===== */
+  .mode-move .toolbar,.mode-move .notice,.mode-move .linenote,.mode-move h1{ display:none; }
+  .movebar{ position:sticky; top:var(--pvtop,0px); z-index:20; background:#f1ebfb; border-bottom:1px solid #dccff2; margin:0 -10px 6px; padding:6px 10px 6px; }
+  .mb1{ display:flex; align-items:center; justify-content:space-between; gap:6px; }
+  .mbl{ display:flex; align-items:center; gap:6px; min-width:0; }
+  .mbt{ font-family:"Hiragino Mincho ProN","Yu Mincho",serif; font-size:19px; font-weight:700; line-height:1.3; white-space:nowrap; }
+  .mbadge{ flex:0 1 auto; background:#7b5cc4; color:#fff; border-radius:999px; padding:1px 10px; font-size:11px; font-weight:700; white-space:nowrap; }
+  .mbr{ display:flex; align-items:center; gap:2px; flex:0 0 auto; }
+  .movebar .lnk{ color:#6b4fa0; min-height:36px; }
+  .btn.done{ background:#6b4fa0; border-color:#6b4fa0; color:#fff; font-weight:700; padding:0 14px; min-height:36px; white-space:nowrap; }
+  .mb2{ display:flex; align-items:center; gap:8px; min-height:24px; }
+  .mbh{ flex:1 1 auto; min-width:0; font-size:12.5px; color:#4a3b73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #mbpath{ flex:0 1 auto; min-width:0; max-width:46%; }
+  .pathpill{ display:block; background:#e4daf7; border-radius:10px; padding:1px 10px; font-size:11.5px; color:#4a3b73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mbwarn{ font-size:12px; color:var(--danger); margin-top:4px; }
+  .mbwarn:empty{ display:none; }
+  .lnk:disabled{ opacity:.35; cursor:default; }
+  .mvtap{ cursor:pointer; }
+  .tgsp{ flex:0 0 auto; width:6px; }
+  .lbl{ display:flex; align-items:center; font-weight:700; font-size:13px; color:#3f6a55; min-height:32px; padding:0 2px; overflow-wrap:anywhere; min-width:0; }
+  .ttl.empty{ color:var(--ink-soft); font-weight:400; }
+  .mv .ttl{ font-size:15px; }
+  .sum.clamp{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .mode-move .event.mv{ padding-bottom:4px; }
+  .card.sel{ background:#ece4fa !important; box-shadow:inset 3px 0 0 #7b5cc4; }
+  .ghead.sel{ background:#ece4fa; box-shadow:inset 3px 0 0 #7b5cc4; border-radius:10px; padding:0 6px; }
+  .mvact{ display:flex; gap:8px; padding:6px 0 4px 8px; }
+  .mvact .btn{ flex:1 1 0; min-width:0; max-width:130px; padding:0 6px; white-space:nowrap; }
+  .mode-move .list-stack.nest::before{ bottom:14px; }
+  .dest .dpath{ display:block; font-size:11px; color:var(--ink-soft); }
+  .dest .dt{ font-weight:700; }
+  .dest .dnote{ display:block; font-size:11px; color:var(--danger); }
+
+  /* モーダル・メニュー */
+  .overlay{ position:fixed; inset:0; background:rgba(30,28,25,.45); z-index:50; display:flex; align-items:flex-end; justify-content:center; }
+  .modal{ background:#fffdf8; width:100%; max-width:560px; max-height:90vh; overflow-y:auto; overscroll-behavior:contain; border-radius:16px 16px 0 0; padding:14px; }
+  @media (min-width:700px){ .overlay{ align-items:center; } .modal{ border-radius:16px; } }
+  .modal h2{ font-size:16px; margin:0 0 6px; }
+  .where{ font-size:12px; background:#eef6e8; border:1px solid #b7d3a5; border-radius:8px; padding:4px 8px; margin-bottom:6px; overflow-wrap:anywhere; }
+  .where.warn{ background:#fbeeee; border-color:#dbb; color:var(--danger); }
+  .field{ margin:8px 0; }
+  .field label{ display:block; font-size:12px; color:var(--ink-soft); margin-bottom:2px; }
+  .field input,.field textarea,.field select{ width:100%; font:inherit; font-size:16px; border:1px solid #bdb6a6; border-radius:8px; padding:8px; background:#fff; }
+  .field textarea{ min-height:120px; resize:vertical; }
+  .field textarea.sm{ min-height:72px; }
+  .err{ color:var(--danger); font-size:12px; }
+  .kindsel{ display:flex; gap:8px; margin:6px 0; }
+  .kindsel button{ flex:1; border:1.5px solid #bdb6a6; background:#fff; border-radius:10px; padding:8px; }
+  .kindsel button.on{ border-color:var(--purple); background:#efe9fa; font-weight:700; }
+  .opsec{ margin-top:12px; padding-top:8px; border-top:1px solid #e0d9c6; }
+  .ops{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .foot{ display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; margin-top:10px; }
+  .dest{ display:block; width:100%; text-align:left; border:1px solid #bdb6a6; background:#fff; border-radius:8px; padding:8px 10px; margin:4px 0; overflow-wrap:anywhere; }
+  .dest[disabled]{ opacity:.4; background:#eee; }
+  .hint{ font-size:12px; color:var(--ink-soft); }
+  .pos{ display:flex; gap:12px; margin:6px 0; font-size:14px; }
+  .pick{ display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:1px solid #bdb6a6; background:#fff; border-radius:10px; padding:6px 10px; margin:4px 0; }
+  .pick.on{ border-color:var(--purple); background:#efe9fa; }
+  .pick .ck{ margin-left:auto; font-weight:700; color:var(--purple); }
+  .toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:rgba(30,28,25,.9); color:#fff; padding:8px 14px; border-radius:999px; font-size:13px; z-index:80; max-width:90vw; }
+
+  /* ===== 本体統合で追加 ===== */
+  .tbsp{ margin-left:auto; }
+  .chkpanel{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:8px 10px; margin:0 0 10px; font-size:13px; }
+  .chkpanel h2{ font-size:14px; margin:0 0 4px; color:var(--danger); }
+  .chkrow{ padding:6px 0; border-top:1px dashed #dbb; }
+  .chkrow:first-of-type{ border-top:none; }
+  .chkrow .why{ color:var(--danger); font-size:12px; }
+  .chkrow .ops{ margin-top:2px; }
+  .errbox{ background:#fbeeee; border:1px solid #d9a3a3; border-radius:10px; padding:10px 12px; color:var(--danger); margin:8px 0; }
+  .errbox textarea{ width:100%; min-height:140px; font-size:12px; margin-top:6px; }
+  .rolerow{ border:1px solid #d8d1c0; border-radius:10px; padding:6px 8px; margin:6px 0; background:#fff; }
+  .rolerow .rr1{ display:flex; gap:6px; align-items:center; }
+  .rolerow input[type=text]{ flex:1 1 auto; min-width:0; font:inherit; font-size:16px; border:1px solid #bdb6a6; border-radius:8px; padding:4px 8px; }
+  .rolerow input[type=color]{ width:40px; height:34px; padding:0; border:1px solid #bdb6a6; border-radius:8px; background:#fff; }
+  .rolerow .rr2{ font-size:12px; margin-top:2px; color:var(--ink-soft); }
+  .rolerow .rr2.warn{ color:var(--danger); font-weight:700; }
+  .emptyall{ background:#fff; border:1px dashed #bdb6a6; border-radius:12px; padding:14px; margin:8px 0; color:var(--ink-soft); text-align:center; }
+  .stwarn{ color:var(--danger); font-size:12px; }
+`;
+
+/* ============ 新プロット：画面（最新試作の表示・操作を基準にする） ============
+   ・表示は試作と同じ見た目・操作を保つため、Shadow DOM（本体CSSと干渉しない）の中に描画する。
+   ・入力欄は「入力のたびに作り直さない」方式：入力はモデルへ直接反映し、再描画しない（フォーカス・カーソル・日本語変換が途切れない）。
+     本体の保存（data.plotV2）への反映は、変換中を避けて少し遅らせて行い、画面移動・フォーカス離脱・構成操作の時にすぐ反映する。
+   ・Reactの再描画で作り直されないよう、この部分はReactが管理しない領域として扱う。 */
+const PLOTV2_PALETTE = ['#2f73a3','#e0149f','#e8782a','#6a8a5a','#7a6aa8','#b07a1f','#2f8f74','#a03a6a'];
+
+function createPlotV2View(host, api){
+  const root = host.attachShadow({ mode:'open' });
+  root.innerHTML = `<style>${PLOTV2_CSS}</style><div class="pv v-card"><div class="wrap"></div><div class="mroot"></div><div class="troot"></div></div>`;
+  const pv = root.querySelector('.pv'), wrap = root.querySelector('.wrap'), mroot = root.querySelector('.mroot'), troot = root.querySelector('.troot');
+
+  let model = null, lastCommitted = null, errState = null;
+  const mine = new WeakSet(); // 自分が本体へ渡したデータ。React側の反映が遅れて古い自分のデータが戻ってきても、外部変更とは扱わない
+  let ctx = { chars:[], places:[] };
+  const ui = loadPlotV2Ui();
+  let mode = 'normal', mv = { sel:null, col:{} };
+  let dirty = false, timer = null, composing = false, destroyed = false;
+  let stMap = {}, modalY = null, pendingAdd = null, pendingOk = null;
+
+  /* ---------- 保存への受け渡し ---------- */
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  function commit(){
+    clearTimeout(timer); timer = null;
+    if(!dirty || !model) return;
+    dirty = false;
+    const obj = { schemaVersion:PLOTV2_VERSION, items:clone(model.items), structures:clone(model.structures) };
+    lastCommitted = obj; mine.add(obj);
+    api.setPlot(obj);
+  }
+  function touch(){ dirty = true; api.markDirty(); clearTimeout(timer); timer = setTimeout(commit, 250); }
+  function changed(){ touch(); commit(); }
+  const saveUi = () => { if(model) savePlotV2Ui(ui, model.items); };
+
+  /* ---------- 表示用の小道具 ---------- */
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const orUndecided = s => s && s.trim() ? esc(s) : '（未定）';
+  const sceneFilled = n => PLOTV2_SCENE_KEYS.some(k => n.scene[k] && n.scene[k].trim());
+  const plain = pvPlain;
+  const find = (id) => pvFind(model.items, id);
+  const labelW = s => Math.max(4.2, Array.from(s||'').reduce((a,ch) => a + (ch.charCodeAt(0) < 256 ? 0.6 : 1), 0) + 1.4).toFixed(1);
+  const fT = (id, f, val, ph, cls, style) => `<input class="inl ${cls}" type="text" data-f="${f}" data-id="${id}" value="${esc(val)}" placeholder="${ph}" aria-label="${ph}" autocomplete="off" enterkeyhint="next"${style?` style="${style}"`:''}>`;
+  const fA = (id, f, val, ph, cls, aria) => `<textarea class="inl ag ${cls}" rows="1" data-f="${f}" data-id="${id}" placeholder="${ph}" aria-label="${aria||ph}">${esc(val)}</textarea>`;
+  const SCENE_FIELDS = [['goal','目的','目的を追加'],['obstacle','対立・障害','対立・障害を追加'],['change','場面で起きる変化','変化を追加'],['memo','自由メモ','メモを追加']];
+  const colorOf = (id) => { let h = 0; for(const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PLOTV2_PALETTE[h % PLOTV2_PALETTE.length]; };
+  const mvName = n => n.label.trim() || n.title.trim() || '未定';
+  const bandSet = () => new Set(Object.keys(ui.st).filter(k => ui.st[k]));
+  const findRole = (rid) => { for(const s of model.structures){ const r = s.roles.find(x => x.id === rid); if(r) return { s, r }; } return null; };
+
+  /* ---------- 出来事・まとまり（通常表示） ---------- */
+  function addBtn(parentId, list){
+    const last = list.length ? list[list.length - 1].id : '';
+    return `<button class="lnk addbtn" data-act="addDlg" data-parent="${parentId||''}" data-after="${last}">＋ 追加</button>`;
+  }
+  function relHtml(n){
+    const chars = n.chars.map(id => ctx.chars.find(c => c.id === id)).filter(Boolean);
+    const places = n.places.map(id => ctx.places.find(p => p.id === id)).filter(Boolean);
+    const lostC = n.chars.length - chars.length, lostP = n.places.length - places.length;
+    const cs = chars.map(c => `<span class="ppl"><span class="av" style="background:${c.color}">${esc(c.icon)}</span><span class="pname">${esc(c.name)}</span></span>`).join('');
+    const ps = places.map(p => `<span class="ppl"><span class="av place">${esc(p.icon)}</span><span class="pname">${esc(p.name)}</span></span>`).join('');
+    const lc = lostC ? `<span class="none-txt">（登録の無い人物 ${lostC}件）</span>` : '', lp = lostP ? `<span class="none-txt">（登録の無い場所 ${lostP}件）</span>` : '';
+    return `<div class="rline">${cs}${lc}${(chars.length||lostC)?'':'<span class="none-txt">キャラ未設定</span>'}<button class="lnk sm" data-act="pickDlg" data-id="${n.id}" data-type="chars" aria-label="キャラクターを追加・解除">＋ キャラ</button></div>
+      <div class="rline">${ps}${lp}${(places.length||lostP)?'':'<span class="none-txt">場所未設定</span>'}<button class="lnk sm" data-act="pickDlg" data-id="${n.id}" data-type="places" aria-label="場所を追加・解除">＋ 場所</button></div>`;
+  }
+  function renderEvent(n){
+    const st = stMap[n.id], open = !!ui.ev[n.id], sceneOpen = !!ui.sc[n.id];
+    let h = `<div class="card event${st?' st':''}${open?' isopen':''}" data-node="${n.id}"${st?` style="--stc:${esc(st.role.color)}"`:''}>`;
+    if(st && st.label) h += `<div class="strow"><button class="stl" style="background:${esc(st.role.color)}" data-act="rangeDlg" data-role="${st.role.id}" aria-label="構成「${esc(st.role.name)}」の範囲を編集">${esc(st.role.name)||'（役割名なし）'}</button>${st.cont?'<span class="stcont">続き</span>':''}</div>`;
+    h += `<div class="ehead" data-row="${n.id}">
+      <button class="tog" data-act="toggleDetail" data-id="${n.id}" aria-label="詳細を${open?'閉じる':'開く'}" aria-expanded="${open}">${open?'▼':'▶'}</button>
+      <div class="emain">${fT(n.id,'title',n.title,'タイトルを入力','t')}${fA(n.id,'summary',n.summary,'概要を追加','s')}</div></div>`;
+    if(open){
+      h += `<div class="edetail">${fA(n.id,'detail',n.detail,'内容を追加','d')}${relHtml(n)}`;
+      if(sceneOpen) h += `<div class="scene">${SCENE_FIELDS.map(([k,l,ph]) => `<div class="sf"><div class="sl">${l}</div>${fA(n.id,'scene.'+k,n.scene[k],ph,'d',l)}</div>`).join('')}</div>`;
+      else if(n.scene.change.trim()) h += `<div class="scsum"><b>場面の変化</b>${esc(n.scene.change)}</div>`;
+      h += `<div class="erow"><button class="lnk" data-act="toggleScene" data-id="${n.id}" aria-expanded="${sceneOpen}">シーン設計${sceneFilled(n)?'（入力あり）':''} ${sceneOpen?'⌄':'›'}</button></div></div>`;
+    }
+    return h + `</div>`;
+  }
+  function strBar(g){
+    const sts = model.structures.filter(s => s.groupId === g.id);
+    const flat = pvGroupFlat(model.items, g.id);
+    if(!sts.length) return `<div class="strbar"><span class="stunset">構成は未設定です<button class="lnk sm" data-act="structDlg" data-id="${g.id}">構成を設定</button></span></div>`;
+    return `<div class="strbar">` + sts.map(s => {
+      const chips = s.roles.map(r => {
+        const x = pvRoleStatus(model.items, r, flat), nm = esc(r.name) || '（役割名なし）';
+        if(x.s === 'unset') return `<span class="stunset">${nm}<button class="lnk sm" data-act="rangeDlg" data-role="${r.id}">範囲を設定</button></span>`;
+        if(x.s === 'check') return `<button class="stchip warn" data-act="rangeDlg" data-role="${r.id}">⚠ ${nm} 要確認</button>`;
+        return `<button class="stchip" style="--stc:${esc(r.color)}" data-act="rangeDlg" data-role="${r.id}">${nm}・${x.count}件</button>`;
+      }).join('');
+      return chips + `<button class="lnk sm" data-act="structDlg" data-id="${g.id}" data-sid="${s.id}">⚙ 構成の設定${s.type?'（'+esc(s.type)+'）':''}</button>`;
+    }).join('') + `</div>`;
+  }
+  function renderGroup(n, depth){
+    const cnt = n.children.length, col = !!ui.col[n.id], showSt = !!ui.st[n.id];
+    let h = `<div class="card group ${depth % 2 ? 'odd' : 'even'}${depth >= 2 ? ' deep2' : ''}" data-node="${n.id}"><div class="ghead" data-row="${n.id}">
+      <div class="gleft"><button class="tog" data-act="toggle" data-id="${n.id}" aria-label="${col?'開く':'閉じる'}" aria-expanded="${!col}">${col?'▶':'▼'}</button>${fT(n.id,'label',n.label,'区分名','lb',`width:${labelW(n.label)}em`)}</div>
+      <div class="gright"><div class="trow">${fT(n.id,'title',n.title,'タイトルを入力','t')}${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}</div>${fA(n.id,'summary',n.summary,'概要を追加','s')}</div>
+      <button class="lnk gact" data-act="toggleStruct" data-id="${n.id}" aria-pressed="${showSt}">${showSt?'✓ ':''}構成</button></div>`;
+    if(!col) h += `<div class="gbody">${showSt ? strBar(n) : ''}${renderList(n.children, n.id, depth + 1)}</div>`;
+    return h + `</div>`;
+  }
+  const listCls = (parentId, depth) => `list-stack ${parentId ? 'nest' : 'top'}${depth >= 3 ? ' deep' : ''}`;
+  function renderList(list, parentId, depth){
+    let h = `<div class="${listCls(parentId, depth)}">`;
+    list.forEach(n => { h += n.kind === 'group' ? renderGroup(n, depth) : renderEvent(n); });
+    if(!list.length) h += `<div class="emptyg">まだ何もありません。</div>`;
+    return h + `<div class="addrow">${addBtn(parentId, list)}</div></div>`;
+  }
+
+  /* ---------- 移動モードの表示 ---------- */
+  function mvActions(id){
+    const info = find(id);
+    return `<div class="mvact"><button class="btn" data-act="mvUp" data-id="${id}" ${info.index===0?'disabled':''}>↑ 上へ</button><button class="btn" data-act="mvDown" data-id="${id}" ${info.index===info.list.length-1?'disabled':''}>↓ 下へ</button><button class="btn" data-act="mvDest" data-id="${id}">移動先…</button></div>`;
+  }
+  function renderMoveEvent(n){
+    const sel = mv.sel === n.id;
+    return `<div class="card event mv${sel?' sel':''}" data-node="${n.id}"><div class="ehead"><span class="tgsp"></span>
+      <div class="emain mvtap" data-act="mvSel" data-id="${n.id}" role="button" tabindex="0" aria-pressed="${sel}"><div class="ttl${n.title.trim()?'':' empty'}">${orUndecided(n.title)}</div>${n.summary.trim()?`<div class="sum clamp">${esc(n.summary)}</div>`:''}</div></div></div>${sel?mvActions(n.id):''}`;
+  }
+  function renderMoveGroup(n, depth){
+    const sel = mv.sel === n.id, col = !!mv.col[n.id], cnt = n.children.length;
+    let h = `<div class="card group mv ${depth % 2 ? 'odd' : 'even'}${depth >= 2 ? ' deep2' : ''}" data-node="${n.id}"><div class="ghead${sel?' sel':''}">
+      <div class="gleft"><button class="tog" data-act="mvToggle" data-id="${n.id}" aria-label="${col?'開く':'閉じる'}" aria-expanded="${!col}">${col?'▶':'▼'}</button><span class="lbl mvtap" data-act="mvSel" data-id="${n.id}" role="button" tabindex="0" aria-pressed="${sel}">${n.label.trim()?esc(n.label):'区分'}</span></div>
+      <div class="gright mvtap" data-act="mvSel" data-id="${n.id}" role="button" tabindex="0"><div class="ttl${n.title.trim()?'':' empty'}">${orUndecided(n.title)}${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}</div>${n.summary.trim()?`<div class="sum clamp">${esc(n.summary)}</div>`:''}</div></div>`;
+    if(sel) h += mvActions(n.id);
+    if(!col) h += `<div class="gbody">${renderMoveList(n.children, n.id, depth + 1)}</div>`;
+    return h + `</div>`;
+  }
+  function renderMoveList(list, parentId, depth){
+    let h = `<div class="${listCls(parentId, depth)}">`;
+    list.forEach(n => { h += n.kind === 'group' ? renderMoveGroup(n, depth) : renderMoveEvent(n); });
+    if(!list.length) h += `<div class="emptyg">（空）</div>`;
+    return h + `</div>`;
+  }
+  function mvPathNames(id){
+    const names = []; let p = find(id).parent;
+    while(p){ names.unshift(mvName(p)); p = find(p.id).parent; }
+    return names;
+  }
+  function movebarHtml(){
+    const sel = mv.sel, hasCheck = pvCheckList(model).length > 0;
+    return `<div class="movebar" id="movebar">
+      <div class="mb1"><div class="mbl"><span class="mbt">プロット</span><span class="mbadge">移動モード</span></div>
+        <div class="mbr"><button class="lnk" data-act="mvOps"${sel?'':' disabled'}>項目操作</button><button class="btn done" data-act="exitMove">移動を終了</button></div></div>
+      <div class="mb2"><div class="mbh" aria-live="polite">${sel ? `『${esc(plain(find(sel).node))}』を移動中` : '動かす巻・章・出来事をタップ'}</div>
+        <div id="mbpath">${sel ? `<span class="pathpill">${esc(mvPathNames(sel).join(' › ') || '作品直下')}</span>` : ''}</div></div>
+      <div class="mbwarn">${hasCheck ? '⚠ 構成の範囲に要確認があります（移動を終えると、プロット上部で確認できます）' : ''}</div></div>`;
+  }
+
+  /* ---------- 要確認パネル（プロット上部。確認・解除はここから） ---------- */
+  function checkPanelHtml(){
+    const list = pvCheckList(model);
+    if(!list.length) return '';
+    return `<div class="chkpanel" role="alert"><h2>⚠ 構成の設定に要確認があります（${list.length}件）</h2>
+      <div class="hint">自動では直しません。範囲を設定し直すか、不要なら範囲の解除・設定の削除をしてください。</div>` +
+      list.map(x => {
+        const g = pvFind(model.items, x.st.groupId), gname = g ? plain(g.node) : '（削除されたまとまり）';
+        const tname = x.st.type ? `「${esc(x.st.type)}」` : '';
+        if(x.orphan) return `<div class="chkrow"><div><b>${esc(gname)}</b> の構成${tname}</div><div class="why">${esc(x.reason)}（役割 ${x.st.roles.length}件の設定は保持しています）</div>
+          <div class="ops"><button class="btn danger" data-act="stDelAsk" data-sid="${x.st.id}">この構成設定を削除</button></div></div>`;
+        return `<div class="chkrow"><div><b>${esc(gname)}</b> の構成${tname} ／ 役割「${esc(x.role.name)||'（役割名なし）'}」</div><div class="why">${esc(x.reason)}</div>
+          <div class="ops"><button class="btn" data-act="rangeDlg" data-role="${x.role.id}">範囲を設定し直す</button><button class="btn" data-act="rangeClearAsk" data-role="${x.role.id}">範囲を解除</button><button class="btn danger" data-act="roleDelAsk" data-role="${x.role.id}">この役割を削除</button></div></div>`;
+      }).join('') + `</div>`;
+  }
+
+  /* ---------- 全体の描画 ---------- */
+  function errHtml(){
+    return `<h1>プロット</h1><div class="errbox"><b>新プロットのデータを読み込めませんでした。</b><br>${esc(errState.message)}<br>
+      元のデータは消さずに保持しています。この間、新プロットの編集はできません（空のデータで上書きしないためです）。バックアップからの読み込みなどで復旧できます。
+      <details><summary>保持している元データを見る</summary><textarea readonly>${esc(JSON.stringify(errState.raw, null, 2))}</textarea></details></div>`;
+  }
+  function syncTop(){
+    const tb = document.querySelector('.topbar');
+    pv.style.setProperty('--pvtop', (tb ? tb.offsetHeight : 0) + 'px');
+  }
+  function render(){
+    const y = window.scrollY;
+    if(errState){ pv.className = 'pv v-card'; wrap.innerHTML = errHtml(); return; }
+    const move = mode === 'move';
+    if(mv.sel && !find(mv.sel)) mv.sel = null;
+    pv.className = 'pv v-' + ui.view + (move ? ' mode-move' : '');
+    syncTop();
+    stMap = pvBuildStMap(model, bandSet());
+    const empty = !model.items.length;
+    wrap.innerHTML = (move ? movebarHtml() : '') +
+      `<h1>プロット</h1>` + (move ? '' : checkPanelHtml()) +
+      `<div class="linenote">ラインは、読者に見せる順番と所属を示します。作中の時間順や場面の地図ではありません。左の線＝順番と所属、右端の色帯と役割名ラベル＝構成です。</div>
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="表示切り替え">
+          <button type="button" data-act="setView" data-view="card" aria-pressed="${ui.view==='card'}">カード</button>
+          <button type="button" data-act="setView" data-view="line" aria-pressed="${ui.view==='line'}">ライン</button>
+        </div>
+        <button class="btn" data-act="expandAll">すべて開く</button>
+        <button class="btn" data-act="collapseAll">すべて閉じる</button>
+        <button class="lnk tbsp" data-act="enterMove" aria-label="移動モードに入る">⇄ 移動</button>
+      </div>` +
+      (empty && !move ? `<div class="emptyall">新プロットはまだ空です。「＋ 追加」から、まとまり（巻・章など）や出来事を追加できます。</div>` : '') +
+      `<div id="view"><div class="trunk"><div class="card endcap">開始</div>${move ? renderMoveList(model.items, null, 0) : renderList(model.items, null, 0)}<div class="card endcap">終了</div></div></div>`;
+    if(!move) growAll();
+    window.scrollTo(0, y);
+  }
+  function autoGrow(el){ el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
+  function growAll(){ root.querySelectorAll('#view textarea.ag').forEach(autoGrow); }
+  const onResize = () => { growAll(); syncTop(); };
+  window.addEventListener('resize', onResize);
+
+  /* 表示切り替え：見ていた要素の画面内の位置を保つ */
+  function captureAnchor(){
+    const els = [...root.querySelectorAll('#view [data-node]')], vh = window.innerHeight;
+    for(const el of els){ const r = el.getBoundingClientRect(); if(r.top >= 0 && r.top < vh) return { id:el.dataset.node, top:r.top }; }
+    let pick = null;
+    for(const el of els){ const r = el.getBoundingClientRect(); if(r.top < 0 && r.bottom > 0) pick = { id:el.dataset.node, top:r.top }; }
+    return pick;
+  }
+  function restoreAnchor(a){
+    if(!a) return;
+    const el = root.querySelector(`#view [data-node="${a.id}"]`); if(!el) return;
+    const d = el.getBoundingClientRect().top - a.top;
+    if(d) window.scrollBy(0, d);
+  }
+  function setView(v){
+    if(v === ui.view) return;
+    const a = captureAnchor();
+    ui.view = v; saveUi(); render(); restoreAnchor(a);
+  }
+
+  /* ---------- 移動モード ---------- */
+  function ensureVisible(){
+    const sel = mv.sel; if(!sel) return;
+    const el = root.querySelector(`#view [data-node="${sel}"]`); if(!el) return;
+    const head = el.querySelector('.ehead, .ghead') || el, act = root.querySelector('#view .mvact');
+    const bar = root.getElementById('movebar'), hh = bar ? bar.getBoundingClientRect().bottom : 0;
+    const r1 = head.getBoundingClientRect(), r2 = (act || head).getBoundingClientRect();
+    if(r1.top < hh + 8) window.scrollBy(0, r1.top - hh - 8);
+    else if(r2.bottom > window.innerHeight - 8) window.scrollBy(0, r2.bottom - window.innerHeight + 8);
+  }
+  function enterMove(){
+    if(composing){ toast('文字の変換を確定してから「移動」を押してください'); return; }
+    const ae = root.activeElement; if(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) ae.blur();
+    commit();
+    const a = captureAnchor(), col = {};
+    pvForEach(model.items, n => { if(n.kind === 'group') col[n.id] = !!ui.col[n.id]; });   // 移動中の開閉は通常表示と分けて持つ（一時状態）
+    mode = 'move'; mv = { sel:null, col }; render(); restoreAnchor(a);
+  }
+  function exitMove(){
+    const sel = mv.sel;
+    let a = captureAnchor();
+    if(sel){
+      const el = root.querySelector(`#view [data-node="${sel}"]`); if(el) a = { id:sel, top:el.getBoundingClientRect().top };
+      let p = (find(sel) || {}).parent;                       // 選択項目が見えるよう、必要な祖先だけ開く
+      while(p){ ui.col[p.id] = false; p = find(p.id).parent; }
+      saveUi();
+    }
+    mode = 'normal'; mv = { sel:null, col:{} }; render(); restoreAnchor(a);
+    if(sel){ const el = root.querySelector(`#view [data-node="${sel}"]`); if(el){ const r = el.getBoundingClientRect(); if(r.top < 0 || r.bottom > window.innerHeight) window.scrollBy(0, r.top - window.innerHeight / 3); } }
+  }
+
+  /* ---------- モーダル・トースト ---------- */
+  function closeModal(){ mroot.innerHTML = ''; if(modalY !== null){ window.scrollTo(0, modalY); modalY = null; } }
+  function openModal(html){ if(!mroot.firstChild) modalY = window.scrollY; mroot.innerHTML = `<div class="overlay" data-act="overlay"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`; }
+  function toast(msg){ troot.innerHTML = `<div class="toast">${esc(msg)}</div>`; clearTimeout(toast.t); toast.t = setTimeout(()=>{ troot.innerHTML = ''; }, 2200); }
+  function askDlg(title, bodyHtml, okLabel, onOk, danger){
+    pendingOk = onOk;
+    openModal(`<h2>${esc(title)}</h2>${bodyHtml}<div class="foot"><button class="btn" data-act="close">やめる</button><button class="btn ${danger?'danger':'primary'}" data-act="askOk">${esc(okLabel)}</button></div>`);
+  }
+
+  function addDlg(parentId, afterId){
+    pendingAdd = { parentId: parentId || null, afterId: afterId || null, kind:'event' };
+    const parent = parentId ? find(parentId).node : null;
+    const where = `追加先：${parent ? `「${esc(plain(parent))}」の中` : '作品直下'}・${afterId ? `「${esc(plain(find(afterId).node))}」の後ろ` : '先頭'}${(!afterId && pvListOf(model.items, parentId||null).length===0) ? '（まだ空です）' : ''}`;
+    openModal(`<h2>追加</h2><div class="where">${where}</div>
+      <div class="kindsel"><button type="button" data-act="kind" data-kind="group">まとまり</button><button type="button" class="on" data-act="kind" data-kind="event">出来事</button></div>
+      <div class="field" id="f_label_wrap" style="display:none"><label>区分名（巻・章・話など自由に。空でも可）</label><input id="f_label" type="text" placeholder="例：3章"></div>
+      <div class="field"><label>タイトル（空でも可）</label><input id="f_title" type="text"></div>
+      <div class="field"><label>短い概要（任意）</label><input id="f_sum" type="text"></div>
+      <div class="foot"><button class="btn" data-act="close">キャンセル</button><button class="btn primary" data-act="addOk">追加</button></div>`);
+    setTimeout(()=>{ const e = root.getElementById('f_title'); if(e) e.focus(); }, 30);
+  }
+  function mvOpsDlg(id){
+    const n = find(id).node;
+    openModal(`<h2>項目操作</h2><div class="where">${esc(plain(n))}</div>
+      <div class="ops">
+        <button class="btn" data-act="addBefore" data-id="${id}">この前に追加</button>
+        <button class="btn" data-act="addAfter" data-id="${id}">この後に追加</button>
+        <button class="btn danger" data-act="delDlg" data-id="${id}">削除</button>
+      </div>
+      <div class="foot"><button class="btn primary" data-act="close">閉じる</button></div>`);
+  }
+  function delDlg(id){
+    const n = find(id).node, c = pvCountAll(n);
+    openModal(`<h2>削除の確認</h2><p>「${esc(plain(n))}」を削除します。</p>
+      ${n.kind==='group'?`<p><b>まとまりを削除すると、${c?`中の項目${c}件もすべて削除されます。`:'中の項目も削除されます（現在は空です）。'}</b></p>`:''}
+      <div class="foot"><button class="btn" data-act="close">やめる</button><button class="btn danger" data-act="delOk" data-id="${id}">削除する</button></div>`);
+  }
+  function mvDestDlg(id){
+    const info = find(id), curParent = info.parent ? info.parent.id : null;
+    const cand = (destId, path, title, note) => `<button class="dest" data-act="mvPick" data-id="${id}" data-dest="${destId||''}" ${note?'disabled':''}>${path?`<span class="dpath">${esc(path)}</span>`:''}<span class="dt">${esc(title)}</span>${note?`<span class="dnote">${note}</span>`:''}</button>`;
+    let items = cand(null, '', '作品直下', curParent === null ? '現在の場所' : '');
+    const walk = (list, anc) => list.forEach(n => {
+      if(n.kind !== 'group') return;
+      const note = n.id === curParent ? '現在の場所' : (pvSelfOrDesc(info.node, n.id) ? '自分または子孫の中には移動できません' : '');
+      items += cand(n.id, anc.length ? anc.join(' › ') : '作品直下', plain(n), note);
+      walk(n.children, anc.concat(mvName(n)));
+    });
+    walk(model.items, []);
+    openModal(`<h2>移動先を選ぶ</h2><div class="hint">「${esc(plain(info.node))}」の移動先（まとまりまたは作品直下）を選んでください。出来事の中には移動できません。</div>
+      ${items}<div class="foot"><button class="btn" data-act="close">キャンセル</button></div>`);
+  }
+  function mvConfirmDlg(id, destId){
+    const n = find(id).node, d = destId ? find(destId).node : null;
+    openModal(`<h2>${d ? 'このまとまりの末尾へ移動' : '作品直下の末尾へ移動'}</h2>
+      <div class="where">対象：「${esc(plain(n))}」<br>移動先：${d ? `「${esc(plain(d))}」（${esc(mvPathNames(destId).concat(mvName(d)).join(' › '))}）` : '作品直下'}</div>
+      <div class="hint">${n.kind==='group'?'中の項目もすべて一緒に移動します。':''}移動後の細かい順番は、「↑ 上へ」「↓ 下へ」で調整できます。</div>
+      <div class="foot"><button class="btn" data-act="close">キャンセル</button><button class="btn primary" data-act="mvDo" data-id="${id}" data-dest="${destId||''}">移動する</button></div>`);
+  }
+  function pickDlg(id, type){
+    const n = find(id).node, cands = type === 'chars' ? ctx.chars : ctx.places, cur = n[type];
+    const known = new Set(cands.map(c => c.id)), unknown = cur.filter(x => !known.has(x));
+    openModal(`<h2>${type==='chars'?'キャラクター':'場所'}を選ぶ</h2><div class="hint">${cands.length ? 'このアプリに登録されている一覧です。タップで追加／解除できます。' : `${type==='chars'?'キャラクター':'場所'}がまだ登録されていません。先に設定から登録してください。`}</div>
+      ${cands.map(c => `<button class="pick${cur.includes(c.id)?' on':''}" data-act="pickToggle" data-id="${id}" data-type="${type}" data-cid="${esc(c.id)}"><span class="av${type==='places'?' place':''}" style="${type==='places'?'':`background:${c.color};`}">${esc(c.icon)}</span><span>${esc(c.name)}</span><span class="ck">${cur.includes(c.id)?'✓ 追加済み':''}</span></button>`).join('')}
+      ${unknown.map(u => `<button class="pick on" data-act="pickToggle" data-id="${id}" data-type="${type}" data-cid="${esc(u)}"><span class="av place">？</span><span>登録の無い項目（削除された可能性）</span><span class="ck">✓ タップで解除</span></button>`).join('')}
+      <div class="foot"><button class="btn primary" data-act="close">閉じる</button></div>`);
+  }
+
+  /* ---------- 構成の設定（まとまりごと） ---------- */
+  function structDlg(groupId, sid){
+    let s = sid ? model.structures.find(x => x.id === sid) : model.structures.find(x => x.groupId === groupId);
+    const g = pvFind(model.items, groupId);
+    if(!s){
+      if(!g) return;
+      s = { id:uid('pvst'), groupId, type:'', roles:[] }; model.structures.push(s); changed();
+    }
+    const flat = pvGroupFlat(model.items, s.groupId);
+    const rows = s.roles.map(r => {
+      const x = pvRoleStatus(model.items, r, flat);
+      const txt = x.s === 'unset' ? '範囲：未設定' : x.s === 'check' ? `⚠ 要確認：${x.reason}` : `範囲：${x.count}件の出来事`;
+      return `<div class="rolerow"><div class="rr1"><input type="color" value="${esc(r.color)}" data-sf="roleColor" data-role="${r.id}" aria-label="色"><input type="text" value="${esc(r.name)}" placeholder="役割名" data-sf="roleName" data-role="${r.id}" aria-label="役割名" autocomplete="off"></div>
+        <div class="rr2${x.s==='check'?' warn':''}">${esc(txt)}</div>
+        <div class="ops"><button class="btn" data-act="rangeDlg" data-role="${r.id}" data-from="struct">範囲を設定</button><button class="btn" data-act="rangeClearAsk" data-role="${r.id}" data-from="struct">範囲を解除</button><button class="btn danger" data-act="roleDelAsk" data-role="${r.id}" data-from="struct">役割を削除</button></div></div>`;
+    }).join('');
+    const presets = Object.keys(PLOT_PRESETS).filter(k => PLOT_PRESETS[k].length);
+    const sc = mroot.querySelector('.modal') ? mroot.querySelector('.modal').scrollTop : 0;
+    openModal(`<h2>構成の設定</h2><div class="where${g?'':' warn'}">対象：${g ? `「${esc(plain(g.node))}」` : '（削除されたまとまり）'}の中の出来事</div>
+      <div class="field"><label>構成の型（任意。自由に入力できます。決めなくても使えます）</label><input id="s_type" type="text" value="${esc(s.type)}" data-sf="type" data-sid="${s.id}" list="pvtypes" autocomplete="off" placeholder="例：起承転結"><datalist id="pvtypes">${Object.keys(PLOT_PRESETS).map(k=>`<option value="${esc(k)}">`).join('')}</datalist></div>
+      ${rows || '<div class="hint">役割がまだありません。「＋ 役割を追加」から作れます。</div>'}
+      <div class="ops"><button class="btn" data-act="roleAdd" data-sid="${s.id}">＋ 役割を追加</button></div>
+      <div class="ops"><select id="s_preset" aria-label="型から役割名を追加"><option value="">型から役割名をまとめて追加…</option>${presets.map(k=>`<option value="${esc(k)}">${esc(k)}（${esc(PLOT_PRESETS[k].join('・'))}）</option>`).join('')}</select><button class="btn" data-act="presetAdd" data-sid="${s.id}">追加</button></div>
+      <div class="hint">範囲は、対象のまとまりの中の出来事を表示順にたどって決めます。章の途中から、複数の章をまたいで指定できます。</div>
+      <div class="foot"><button class="btn danger" data-act="stDelAsk" data-sid="${s.id}" data-from="struct">この構成設定を削除</button><button class="btn primary" data-act="structClose">閉じる</button></div>`);
+    const m = mroot.querySelector('.modal'); if(m) m.scrollTop = sc;
+  }
+  let structReturn = null; // 構成の設定モーダルから範囲モーダルへ入った時、戻り先を覚えておく
+  function rangeDlg(rid, fromStruct){
+    const f = findRole(rid); if(!f) return;
+    const { s, r } = f, flat = pvGroupFlat(model.items, s.groupId);
+    if(!flat){ toast('対象のまとまりが無いため、範囲は設定できません'); return; }
+    structReturn = fromStruct ? { groupId:s.groupId, sid:s.id } : null;
+    const st = pvRoleStatus(model.items, r, flat);
+    const opts = sel => `<option value="">（選んでください）</option>` + flat.map(x => `<option value="${x.node.id}"${x.node.id===sel?' selected':''}>${esc(plain(x.parent))} ／ ${esc(x.node.title.trim() || '未定')}</option>`).join('');
+    openModal(`<h2>構成の範囲を編集</h2>
+      ${st.s==='check'?`<div class="where warn">要確認：${esc(st.reason)}。範囲を指定し直してください（自動では直しません）。</div>`:''}
+      <div class="field"><label>役割名</label><input id="r_name" type="text" value="${esc(r.name)}"></div>
+      <div class="field"><label>始まりの出来事</label><select id="r_start">${opts(r.startId)}</select></div>
+      <div class="field"><label>終わりの出来事</label><select id="r_end">${opts(r.endId)}</select></div>
+      <div class="hint">章の途中から、複数の章をまたいで指定できます。始まりと終わりが同じ出来事でも設定できます。</div>
+      <div class="err" id="r_err"></div>
+      <div class="foot"><button class="btn danger" data-act="rangeClearAsk" data-role="${r.id}">範囲を解除</button><button class="btn" data-act="rangeCancel">キャンセル</button><button class="btn primary" data-act="rangeOk" data-role="${r.id}">保存</button></div>`);
+  }
+  function afterRangeModal(){
+    const back = structReturn; structReturn = null;
+    if(back){ closeModal(); render(); structDlg(back.groupId, back.sid); } else { closeModal(); render(); }
+  }
+
+  /* ---------- 操作の受け口（カード・ラインで共通） ---------- */
+  root.addEventListener('click', e => {
+    const t = e.target.closest('[data-act]'); if(!t) return;
+    const act = t.dataset.act, id = t.dataset.id || null;
+    if(act === 'overlay'){ if(e.target === t){ closeModal(); if(model) render(); } return; }
+    switch(act){
+      case 'close': closeModal(); if(model) render(); break;
+      case 'setView': setView(t.dataset.view); break;
+      case 'toggle': ui.col[id] = !ui.col[id]; saveUi(); render(); break;
+      case 'toggleDetail': ui.ev[id] = !ui.ev[id]; saveUi(); render(); break;
+      case 'toggleScene': ui.sc[id] = !ui.sc[id]; saveUi(); render(); break;
+      case 'toggleStruct': ui.st[id] = !ui.st[id]; saveUi(); render(); break;
+      case 'expandAll': pvForEach(model.items, n => { if(n.kind==='group') ui.col[n.id] = false; else ui.ev[n.id] = true; }); saveUi(); render(); break;
+      case 'collapseAll': pvForEach(model.items, n => { if(n.kind==='group') ui.col[n.id] = true; else ui.ev[n.id] = false; }); saveUi(); render(); break;
+      case 'addDlg': addDlg(t.dataset.parent, t.dataset.after); break;
+      case 'kind': {
+        pendingAdd.kind = t.dataset.kind;
+        mroot.querySelectorAll('.kindsel button').forEach(b => b.classList.toggle('on', b === t));
+        root.getElementById('f_label_wrap').style.display = t.dataset.kind === 'group' ? '' : 'none'; break;
+      }
+      case 'addOk': {
+        const p = pendingAdd, title = root.getElementById('f_title').value, sum = root.getElementById('f_sum').value;
+        const n = p.kind === 'group' ? pvMakeGroup(root.getElementById('f_label').value, title, sum) : pvMakeEvent(title, sum);
+        const list = pvListOf(model.items, p.parentId); if(!list){ toast('その場所へは追加できません'); break; }
+        const i = p.afterId ? list.findIndex(x => x.id === p.afterId) : -1;
+        list.splice(i + 1, 0, n);
+        if(mode === 'move'){ mv.sel = n.id; if(p.parentId) mv.col[p.parentId] = false; }
+        else if(p.parentId){ ui.col[p.parentId] = false; saveUi(); }
+        changed(); closeModal(); render(); if(mode === 'move') ensureVisible(); break;
+      }
+      case 'delDlg': delDlg(id); break;
+      case 'delOk': { const i = find(id); if(i){ i.list.splice(i.index, 1); changed(); } closeModal(); render(); break; }
+      case 'addBefore': case 'addAfter': {
+        const info = find(id);
+        const afterId = act === 'addAfter' ? id : (info.index > 0 ? info.list[info.index - 1].id : null);
+        addDlg(info.parent ? info.parent.id : null, afterId); break;
+      }
+      case 'enterMove': enterMove(); break;
+      case 'exitMove': exitMove(); break;
+      case 'mvSel': mv.sel = mv.sel === id ? null : id; render(); ensureVisible(); break;
+      case 'mvToggle': mv.col[id] = !mv.col[id]; render(); break;
+      case 'mvUp': if(pvShift(model.items, id, -1)) changed(); render(); ensureVisible(); break;
+      case 'mvDown': if(pvShift(model.items, id, 1)) changed(); render(); ensureVisible(); break;
+      case 'mvOps': if(mv.sel) mvOpsDlg(mv.sel); break;
+      case 'mvDest': mvDestDlg(id); break;
+      case 'mvPick': mvConfirmDlg(id, t.dataset.dest || null); break;
+      case 'mvDo': {
+        const dest = t.dataset.dest || null;
+        if(!pvMove(model.items, id, dest)){ toast('その場所へは移動できません'); break; }
+        changed();
+        let g = dest; while(g){ mv.col[g] = false; g = find(g).parent ? find(g).parent.id : null; }   // 移動先の祖先を開く
+        closeModal(); render(); ensureVisible(); toast('移動しました'); break;
+      }
+      case 'pickDlg': pickDlg(id, t.dataset.type); break;
+      case 'pickToggle': {
+        const n = find(id).node, arr = n[t.dataset.type], c = t.dataset.cid, i = arr.indexOf(c);
+        if(i >= 0) arr.splice(i, 1); else arr.push(c);
+        changed();
+        const sc = mroot.querySelector('.modal').scrollTop; pickDlg(id, t.dataset.type); mroot.querySelector('.modal').scrollTop = sc; break;
+      }
+      case 'askOk': { const f = pendingOk; pendingOk = null; if(f) f(); break; }
+      /* 構成 */
+      case 'structDlg': structDlg(id, t.dataset.sid || null); break;
+      case 'structClose': closeModal(); render(); break;
+      case 'roleAdd': {
+        const s = model.structures.find(x => x.id === t.dataset.sid); if(!s) break;
+        s.roles.push({ id:uid('pvr'), name:'', color:PLOTV2_ROLE_COLORS[s.roles.length % PLOTV2_ROLE_COLORS.length], startId:'', endId:'' });
+        changed(); structDlg(s.groupId, s.id); break;
+      }
+      case 'presetAdd': {
+        const s = model.structures.find(x => x.id === t.dataset.sid); if(!s) break;
+        const key = root.getElementById('s_preset').value; if(!key || !PLOT_PRESETS[key]) { toast('追加する型を選んでください'); break; }
+        PLOT_PRESETS[key].forEach(nm => s.roles.push({ id:uid('pvr'), name:nm, color:PLOTV2_ROLE_COLORS[s.roles.length % PLOTV2_ROLE_COLORS.length], startId:'', endId:'' }));
+        if(!s.type) s.type = key;
+        changed(); structDlg(s.groupId, s.id); break;
+      }
+      case 'roleDelAsk': {
+        const f = findRole(t.dataset.role); if(!f) break; const from = t.dataset.from === 'struct';
+        askDlg('役割の削除', `<p>役割「${esc(f.r.name)||'（役割名なし）'}」を削除します。この役割の範囲設定も消えます。</p>`, '削除する', () => {
+          f.s.roles = f.s.roles.filter(x => x.id !== f.r.id); changed(); if(from){ closeModal(); structDlg(f.s.groupId, f.s.id); } else { closeModal(); render(); }
+        }, true); break;
+      }
+      case 'stDelAsk': {
+        const s = model.structures.find(x => x.id === t.dataset.sid); if(!s) break; const from = t.dataset.from === 'struct';
+        askDlg('構成設定の削除', `<p>この構成設定（役割${s.roles.length}件）を削除します。出来事そのものは削除されません。</p>`, '削除する', () => {
+          model.structures = model.structures.filter(x => x.id !== s.id); changed(); closeModal(); render();
+        }, true); break;
+      }
+      case 'rangeDlg': rangeDlg(t.dataset.role, t.dataset.from === 'struct'); break;
+      case 'rangeCancel': afterRangeModal(); break;
+      case 'rangeOk': {
+        const f = findRole(t.dataset.role); if(!f) break;
+        const flat = pvGroupFlat(model.items, f.s.groupId) || [];
+        const name = root.getElementById('r_name').value.trim(), s = root.getElementById('r_start').value, en = root.getElementById('r_end').value;
+        const err = m => { root.getElementById('r_err').textContent = m; };
+        if(!name){ err('役割名を入力してください。'); break; }
+        if(!s || !en){ err('始まりと終わりの出来事を選んでください。'); break; }
+        if(flat.findIndex(x => x.node.id === s) > flat.findIndex(x => x.node.id === en)){ err('終わりは、始まりと同じか、それより後ろの出来事にしてください。'); break; }
+        f.r.name = name; f.r.startId = s; f.r.endId = en;
+        changed(); afterRangeModal(); break;
+      }
+      case 'rangeClearAsk': {
+        const f = findRole(t.dataset.role); if(!f) break; const back = structReturn || (t.dataset.from === 'struct' ? { groupId:f.s.groupId, sid:f.s.id } : null);
+        askDlg('範囲の解除', `<p>役割「${esc(f.r.name)||'（役割名なし）'}」の始点・終点の設定を解除します（役割そのものは残ります）。</p>`, '解除する', () => {
+          f.r.startId = ''; f.r.endId = ''; changed(); structReturn = null; closeModal(); render(); if(back) structDlg(back.groupId, back.sid);
+        }); break;
+      }
+    }
+  });
+
+  /* ---------- 直接編集：入力は即座にモデルへ反映（再描画しないのでフォーカス・IME入力は途切れない） ---------- */
+  function applyField(t){
+    const f = t.dataset && t.dataset.f; if(!f || !model) return false;
+    const info = find(t.dataset.id); if(!info) return false;
+    const n = info.node;
+    if(f.startsWith('scene.')){ if(n.kind==='event') n.scene[f.slice(6)] = t.value; } else if(f==='label'||f==='title'||f==='summary'||f==='detail') n[f] = t.value;
+    if(t.tagName === 'TEXTAREA') autoGrow(t);
+    if(f === 'label') t.style.width = labelW(t.value) + 'em';
+    touch();
+    return true;
+  }
+  function applyStructField(t){
+    const sf = t.dataset && t.dataset.sf; if(!sf || !model) return false;
+    if(sf === 'type'){ const s = model.structures.find(x => x.id === t.dataset.sid); if(s){ s.type = t.value; touch(); } }
+    else { const f = findRole(t.dataset.role); if(f){ if(sf === 'roleName') f.r.name = t.value; else if(sf === 'roleColor') f.r.color = t.value; touch(); } }
+    return true;
+  }
+  root.addEventListener('input', e => {
+    if(e.isComposing || composing) return;   // 日本語変換中は確定しない（変換が終わった時にまとめて反映）
+    if(!applyField(e.target)) applyStructField(e.target);
+  });
+  root.addEventListener('compositionstart', () => { composing = true; }, true);
+  root.addEventListener('compositionend', e => {
+    composing = false;
+    if(!applyField(e.target)) applyStructField(e.target);
+  }, true);
+  root.addEventListener('focusout', () => { if(!composing) commit(); });
+  root.addEventListener('keydown', e => {
+    const t = e.target; if(!t.dataset || !t.dataset.f || e.isComposing || composing) return;
+    if(e.key === 'Escape'){ t.blur(); return; }
+    if(e.key === 'Enter' && t.tagName === 'INPUT'){
+      e.preventDefault();
+      const box = t.closest('.ghead, .ehead'), next = t.dataset.f === 'label' ? box.querySelector('input[data-f=title]') : box.querySelector('textarea[data-f=summary]');
+      if(next) next.focus();
+    }
+  });
+  const onHide = () => { if(document.visibilityState === 'hidden' && !composing) commit(); };
+  document.addEventListener('visibilitychange', onHide);
+  window.addEventListener('pagehide', onHide);
+
+  /* ---------- 外から呼ぶ口 ---------- */
+  return {
+    sync(plot, err, chars, places){
+      ctx = {
+        chars: (chars||[]).map(c => ({ id:c.id, name:c.name || '（名前なし）', icon:Array.from(c.name || '？')[0], color:colorOf(c.id) })),
+        places: (places||[]).map(p => ({ id:p.id, name:p.name || '（名前なし）', icon:'📍' })),
+      };
+      if(err){ errState = err; model = null; lastCommitted = null; dirty = false; clearTimeout(timer); closeModal(); render(); return; }
+      errState = null;
+      if(!model || (plot !== lastCommitted && !mine.has(plot))){
+        clearTimeout(timer); dirty = false;
+        model = clone(plot); lastCommitted = plot;
+        mode = 'normal'; mv = { sel:null, col:{} }; mroot.innerHTML = ''; modalY = null;
+        render();
+      }
+    },
+    destroy(){
+      destroyed = true;
+      commit();
+      window.removeEventListener('resize', onResize);
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', onHide);
+      clearTimeout(timer);
+    },
+  };
+}
+
+function PlotV2({ data, setData, markDirty }){
+  const hostRef = useRef(null), ctlRef = useRef(null);
+  const apiRef = useRef({});
+  apiRef.current = {
+    setPlot: (obj) => setData(d => (d.plotV2Error ? d : { ...d, plotV2: obj })),
+    markDirty: () => { if(markDirty) markDirty(); },
+  };
+  useEffect(()=>{
+    const ctl = createPlotV2View(hostRef.current, { setPlot:(o)=>apiRef.current.setPlot(o), markDirty:()=>apiRef.current.markDirty() });
+    ctlRef.current = ctl;
+    ctl.sync(data.plotV2, data.plotV2Error, data.characters, data.locations);
+    return ()=>{ ctl.destroy(); ctlRef.current = null; };
+  }, []);
+  useEffect(()=>{
+    if(ctlRef.current) ctlRef.current.sync(data.plotV2, data.plotV2Error, data.characters, data.locations);
+  }, [data.plotV2, data.plotV2Error, data.characters, data.locations]);
+  return <div ref={hostRef} />;
 }
 
 /* ============ アプリ本体 ============ */
@@ -10330,12 +11343,14 @@ function App(){
   const fileInputRef = useRef();
 
   const makeCloudSnapshot=useCallback(()=>({
-    schemaVersion:1, data, writingSnippets, expressionDictionary, specialDictionary, mediaDictionary,
+    schemaVersion:1, data:serializableData(data), writingSnippets, expressionDictionary, specialDictionary, mediaDictionary,
     adultDictionary, adultPhraseRemix, adultOnomatopoeia, adultSceneFlow, generalScenes, storyOutlines, storyPatterns
   }),[data,writingSnippets,expressionDictionary,specialDictionary,mediaDictionary,adultDictionary,adultPhraseRemix,adultOnomatopoeia,adultSceneFlow,generalScenes,storyOutlines,storyPatterns]);
 
   const applyCloudSnapshot=useCallback((payload)=>{
     if(!payload||!payload.data) throw new Error('クラウドデータの形式が不正です');
+    const plotErr=plotV2PayloadError(payload.data);
+    if(plotErr) throw new Error('クラウドの新プロットのデータを読み込めないため、この端末のデータは変更していません。'+plotErr);
     applyingRemoteRef.current=true;
     setData(migrateData(payload.data)); // 旧シーン進行の取り込みは、adultSceneFlowの更新を受けた下のuseEffectが行う
     if(payload.writingSnippets) setWritingSnippets(normalizeWritingSnippets(payload.writingSnippets));
@@ -10378,7 +11393,7 @@ function App(){
 
   const pullCloud=useCallback(async()=>{
     if(!syncConfig.key)return;
-    if(!confirm('この端末の本文・設定・辞典を、クラウドの内容で置き換えます。画像は変更しません。よろしいですか？'))return;
+    if(!confirm('この端末の本文・設定・辞典・新プロットを、クラウドの内容で置き換えます。クラウドに新プロットが無い場合、この端末の新プロットは空になります。画像は変更しません。よろしいですか？'))return;
     setSyncState({phase:'pulling',message:''});
     try{
       const remote=await syncRequest('GET',syncConfig.key);
@@ -10392,6 +11407,7 @@ function App(){
 
   const pushCloud=useCallback(async(silent=false)=>{
     if(!syncConfig.enabled||!syncConfig.key||(!syncReadyRef.current&&!silent))return;
+    if(data.plotV2Error){setSyncState({phase:'error',message:'新プロットのデータが読み込めない状態のため、クラウドへの保存を止めています（破損状態を確定させないためです）。'});return;}
     const payload=makeCloudSnapshot();const serialized=JSON.stringify(payload);
     if(silent&&serialized===lastCloudSnapshotRef.current)return;
     if(!silent)setSyncState({phase:'pushing',message:''});
@@ -10404,13 +11420,13 @@ function App(){
       if(err.status===409){syncReadyRef.current=false;setSyncState({phase:'conflict',message:`別の端末で更新されています（クラウド更新 ${err.result&&err.result.revision}）。クラウドから読み込んでください。`});}
       else setSyncState({phase:'error',message:err.message});
     }
-  },[syncConfig,makeCloudSnapshot,syncRequest]);
+  },[syncConfig,makeCloudSnapshot,syncRequest,data.plotV2Error]);
 
   // 保存
   useEffect(()=>{
     setSaveState('saving');
     const t = setTimeout(()=>{
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); setSaveState('saved'); }
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableData(data))); setSaveState('saved'); }
       catch(e){ console.error(e); setSaveState('error'); }
     }, 400);
     return ()=>clearTimeout(t);
@@ -10544,7 +11560,7 @@ function App(){
 
   const handleExport = async () => {
     const images = await imageStorage.getAll();
-    const payload = { exportedAt: new Date().toISOString(), data, images, writingSnippets, expressionDictionary, specialDictionary, mediaDictionary, adultDictionary, adultPhraseRemix, adultOnomatopoeia, adultSceneFlow, generalScenes, storyOutlines, storyPatterns };
+    const payload = { exportedAt: new Date().toISOString(), data:serializableData(data), images, writingSnippets, expressionDictionary, specialDictionary, mediaDictionary, adultDictionary, adultPhraseRemix, adultOnomatopoeia, adultSceneFlow, generalScenes, storyOutlines, storyPatterns };
     const blob = new Blob([JSON.stringify(payload)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -10561,7 +11577,10 @@ function App(){
       const text = await file.text();
       const payload = JSON.parse(text);
       if(!payload.data) throw new Error('形式が不正です');
-      if(!confirm('現在のデータを、読み込んだバックアップで上書きします。よろしいですか？')) { e.target.value=''; return; }
+      const plotErr = plotV2PayloadError(payload.data);
+      if(plotErr){ alert('読み込みを中止しました。このバックアップの新プロットのデータが読み込めない形式です。現在のデータは変更していません。\n\n'+plotErr); e.target.value=''; return; }
+      const hasPlotV2 = payload.data.plotV2!==undefined && payload.data.plotV2!==null;
+      if(!confirm('現在のデータを、読み込んだバックアップで上書きします。新プロットも上書きの対象です。'+(hasPlotV2?'':'\n（このバックアップには新プロットが含まれていないため、新プロットは空になります。）')+'\nよろしいですか？')) { e.target.value=''; return; }
       if(payload.images){
         for(const [id, url] of Object.entries(payload.images)){ await imageStorage.save(id, url); }
       }
@@ -10668,6 +11687,8 @@ function App(){
   } else if(screen==='settingsHub'){
     body = <SettingsHub data={data} navigateTo={navigateTo} />;
   } else if(screen==='plot'){
+    body = <PlotV2 data={data} setData={setData} markDirty={()=>setSaveState('saving')} />;
+  } else if(screen==='plotOld'){
     body = <Plot data={data} setData={setData} allChars={allChars} allLocations={allLocations} />;
   } else if(screen==='storyTools'){
     body = <StoryToolsScreen data={data} setData={setData} outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} openSceneSignal={sceneToolsSignal} />;
