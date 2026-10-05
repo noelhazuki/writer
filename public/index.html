@@ -10687,6 +10687,78 @@ const PLOTV2_CSS = String.raw`
   .rolerow .rr2.warn{ color:var(--danger); font-weight:700; }
   .emptyall{ background:#fff; border:1px dashed #bdb6a6; border-radius:12px; padding:14px; margin:8px 0; color:var(--ink-soft); text-align:center; }
   .stwarn{ color:var(--danger); font-size:12px; }
+
+  /* ===== スマホ幅対応・開閉操作・アイコン（新プロットの中だけに適用） ===== */
+  .pv{ --P:12px; --G:9px; --CP:8px; }
+  .ghead,.ehead{ display:block; position:relative; }
+  .grow1{ display:flex; flex-wrap:wrap; align-items:center; gap:0 8px; min-width:0; }
+  .grow1 .inl.lb{ flex:1 1 4.6em; width:auto; min-width:4.2em; max-width:100%; margin:0 0 0 -4px; min-height:32px; }
+  .grow1 .cnt{ margin-left:0; }
+  .grow1 .gact{ margin-left:auto; }
+  .grow1 .lbl{ flex:1 1 4.6em; min-width:4.2em; overflow-wrap:anywhere; }
+  .lvl{ flex:0 0 auto; font-size:10.5px; color:var(--ink-soft); border:1px solid #cfe4d8; background:#fff; border-radius:8px; padding:0 6px; white-space:nowrap; }
+  .inl.t{ text-overflow:clip; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .inl.s{ overflow-wrap:anywhere; }
+  .tgrow{ display:flex; margin-top:0; }
+  .tgl{ min-height:44px; padding:0 6px; font-weight:600; justify-content:flex-start; gap:4px; }
+  .tri{ display:inline-block; width:1.1em; font-size:12px; text-align:center; }
+  .edetail{ padding-left:2px; }
+  .v-line .edetail{ padding-left:2px; }
+  .mv .mvtap{ display:block; padding:4px 0; }
+  .ghead.sel{ padding:0 6px; }
+  .ghead.sel .mvtap{ padding-top:4px; }
+  .mvact{ padding-left:2px; }
+  .kinddesc{ font-size:12px; color:var(--ink-soft); margin:2px 0 8px; }
+  .kinddesc div{ padding:1px 0; }
+  .kinddesc .on{ color:var(--ink); }
+  .kinddesc .on b{ color:var(--purple); }
+  .av{ position:relative; width:28px; height:28px; border-radius:50%; overflow:hidden; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; background:var(--paper-dim,#eae4d6); border:1px solid var(--line,#ddd5c3); color:var(--ink-soft); font-size:12px; line-height:1; }
+  .av.place{ background:#dfe8e2; color:#3f5a4d; }
+  .av.place .avph{ font-size:15px; }
+  .av .avimg{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .ppl{ align-items:center; max-width:100%; }
+  .pname{ min-width:0; overflow-wrap:anywhere; }
+  .pick .av{ width:36px; height:36px; }
+  .pick .pname{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
+  .pick .ck{ flex:0 0 auto; }
+
+  /* ライン表示：字下げは1階層ごとに小さく、深い階層は上限を設ける（所属は線・点・「N階層」表示で補う） */
+  .v-line .trunk{ padding-left:calc(var(--G) + 5px); }
+  .v-line .trunk::before{ left:calc(5px - 1px); }
+  .v-line .card{ padding:0 var(--CP); }
+  .v-line .event{ padding:2px var(--CP); }
+  .v-line .list-stack.nest{ padding-left:var(--P); }
+  .v-line .list-stack.deep{ --P:6px; }
+  .v-line .list-stack.cap{ --P:0px; padding-left:6px; border-left:2px solid #c3e3d5; margin-left:2px; }
+  .v-line .list-stack.nest::before{ left:calc(var(--P) - var(--G) - .75px); }
+  .v-line .list-stack.nest::after{ left:calc(-1 * var(--G)); width:var(--P); }
+  .v-line .list-stack.cap::before,.v-line .list-stack.cap::after{ display:none; }
+  .v-line .list-stack.cap .ehead::before,.v-line .list-stack.cap .ghead::before,.v-line .list-stack.cap .addbtn::before{ display:none; }
+  .v-line .ehead::before,.v-line .ghead::before{ left:calc(-1 * (var(--CP) + var(--G)) - var(--dw) / 2); top:calc(15px - var(--dw) / 2); }
+  .v-line .gbody{ margin:0 calc(-1 * var(--CP)); }
+  .v-line .strbar{ padding-left:calc(var(--CP) + var(--P)); }
+  .v-line .addbtn::before{ left:calc(-1 * var(--G) - 3px); }
+  .v-line .endcap::before{ left:calc(-1 * var(--G) - 5px); }
+  .v-line .mode-move .ehead::before{ top:calc(15px - var(--dw) / 2); }
+
+  /* カード表示：入れ子ごとに余白が積み重ならないようにする */
+  .v-card .gbody .group.deep2{ padding:3px 5px 6px; }
+  .v-card .gbody .group.deep4{ padding:3px 2px 5px; }
+
+  @media (max-width:600px){
+    :host{ margin:0 -16px; }
+    .pv{ --P:10px; --G:8px; --CP:6px; border-radius:0; }
+    .wrap{ padding:8px 8px 80px; }
+    .movebar{ margin:0 -8px 6px; padding:6px 8px; }
+    .v-card .group{ padding:6px 8px 8px; border-radius:14px; }
+    .v-card .gbody .group{ padding:4px 6px 6px; border-radius:12px; }
+    .v-card .gbody .group.deep2{ padding:3px 4px 5px; }
+    .v-card .gbody .group.deep4{ padding:3px 2px 4px; }
+    .v-card .event{ padding:4px 8px 4px; border-radius:10px; }
+    .v-card .endcap{ padding:6px 12px; }
+    .v-line .list-stack.cap{ padding-left:4px; }
+    .modal{ padding:12px; }
+  }
 `;
 
 /* ============ 新プロット：画面（最新試作の表示・操作を基準にする） ============
@@ -10708,6 +10780,7 @@ function createPlotV2View(host, api){
   let mode = 'normal', mv = { sel:null, col:{} };
   let dirty = false, timer = null, composing = false, destroyed = false;
   let stMap = {}, modalY = null, pendingAdd = null, pendingOk = null;
+  const imgCache = new Map(), imgPending = new Set(); // キャラアイコン：画像IDごとの表示用URL（プロットには画像データを保存しない。既存の画像保存から都度取得）
 
   /* ---------- 保存への受け渡し ---------- */
   const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -10729,8 +10802,25 @@ function createPlotV2View(host, api){
   const sceneFilled = n => PLOTV2_SCENE_KEYS.some(k => n.scene[k] && n.scene[k].trim());
   const plain = pvPlain;
   const find = (id) => pvFind(model.items, id);
-  const labelW = s => Math.max(4.2, Array.from(s||'').reduce((a,ch) => a + (ch.charCodeAt(0) < 256 ? 0.6 : 1), 0) + 1.4).toFixed(1);
-  const fT = (id, f, val, ph, cls, style) => `<input class="inl ${cls}" type="text" data-f="${f}" data-id="${id}" value="${esc(val)}" placeholder="${ph}" aria-label="${ph}" autocomplete="off" enterkeyhint="next"${style?` style="${style}"`:''}>`;
+  const fT = (id, f, val, ph, cls) => `<textarea class="inl ag ${cls}" rows="1" data-f="${f}" data-id="${id}" placeholder="${ph}" aria-label="${ph}" autocomplete="off" enterkeyhint="next">${esc(val)}</textarea>`;
+  const avatar = (c, cls) => `<span class="av ${cls||''}" data-img="${esc(c.imageId||'')}"><span class="avph">${cls==='place'?esc(c.icon):'?'}</span></span>`;
+  // 取得済みの画像を表示へ反映。未取得なら既存の画像保存から読み込む（失敗・未登録は代替表示のまま。表示寸法は固定なのでレイアウトは動かない）
+  function paintIcons(){
+    root.querySelectorAll('.av[data-img]').forEach(el => {
+      const id = el.dataset.img; if(!id) return;
+      const u = imgCache.get(id);
+      if(u){ if(!el.querySelector('img')){ const im = document.createElement('img'); im.className = 'avimg'; im.alt = ''; im.src = u; el.textContent = ''; el.appendChild(im); } return; }
+      if(imgCache.has(id) || imgPending.has(id)) return;
+      imgPending.add(id);
+      Promise.resolve().then(() => imageStorage.get(id)).then(x => imgCache.set(id, x || null), () => imgCache.set(id, null))
+        .then(() => { imgPending.delete(id); if(!destroyed) paintIcons(); });
+    });
+  }
+  root.addEventListener('error', e => {
+    const t = e.target; if(!t || !t.classList || !t.classList.contains('avimg')) return;
+    const el = t.parentNode; if(el && el.dataset) imgCache.set(el.dataset.img, null);
+    if(el){ el.innerHTML = '<span class="avph">?</span>'; }
+  }, true);
   const fA = (id, f, val, ph, cls, aria) => `<textarea class="inl ag ${cls}" rows="1" data-f="${f}" data-id="${id}" placeholder="${ph}" aria-label="${aria||ph}">${esc(val)}</textarea>`;
   const SCENE_FIELDS = [['goal','目的','目的を追加'],['obstacle','対立・障害','対立・障害を追加'],['change','場面で起きる変化','変化を追加'],['memo','自由メモ','メモを追加']];
   const colorOf = (id) => { let h = 0; for(const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PLOTV2_PALETTE[h % PLOTV2_PALETTE.length]; };
@@ -10747,8 +10837,8 @@ function createPlotV2View(host, api){
     const chars = n.chars.map(id => ctx.chars.find(c => c.id === id)).filter(Boolean);
     const places = n.places.map(id => ctx.places.find(p => p.id === id)).filter(Boolean);
     const lostC = n.chars.length - chars.length, lostP = n.places.length - places.length;
-    const cs = chars.map(c => `<span class="ppl"><span class="av" style="background:${c.color}">${esc(c.icon)}</span><span class="pname">${esc(c.name)}</span></span>`).join('');
-    const ps = places.map(p => `<span class="ppl"><span class="av place">${esc(p.icon)}</span><span class="pname">${esc(p.name)}</span></span>`).join('');
+    const cs = chars.map(c => `<span class="ppl">${avatar(c)}<span class="pname">${esc(c.name)}</span></span>`).join('');
+    const ps = places.map(p => `<span class="ppl">${avatar(p,'place')}<span class="pname">${esc(p.name)}</span></span>`).join('');
     const lc = lostC ? `<span class="none-txt">（登録の無い人物 ${lostC}件）</span>` : '', lp = lostP ? `<span class="none-txt">（登録の無い場所 ${lostP}件）</span>` : '';
     return `<div class="rline">${cs}${lc}${(chars.length||lostC)?'':'<span class="none-txt">キャラ未設定</span>'}<button class="lnk sm" data-act="pickDlg" data-id="${n.id}" data-type="chars" aria-label="キャラクターを追加・解除">＋ キャラ</button></div>
       <div class="rline">${ps}${lp}${(places.length||lostP)?'':'<span class="none-txt">場所未設定</span>'}<button class="lnk sm" data-act="pickDlg" data-id="${n.id}" data-type="places" aria-label="場所を追加・解除">＋ 場所</button></div>`;
@@ -10757,9 +10847,8 @@ function createPlotV2View(host, api){
     const st = stMap[n.id], open = !!ui.ev[n.id], sceneOpen = !!ui.sc[n.id];
     let h = `<div class="card event${st?' st':''}${open?' isopen':''}" data-node="${n.id}"${st?` style="--stc:${esc(st.role.color)}"`:''}>`;
     if(st && st.label) h += `<div class="strow"><button class="stl" style="background:${esc(st.role.color)}" data-act="rangeDlg" data-role="${st.role.id}" aria-label="構成「${esc(st.role.name)}」の範囲を編集">${esc(st.role.name)||'（役割名なし）'}</button>${st.cont?'<span class="stcont">続き</span>':''}</div>`;
-    h += `<div class="ehead" data-row="${n.id}">
-      <button class="tog" data-act="toggleDetail" data-id="${n.id}" aria-label="詳細を${open?'閉じる':'開く'}" aria-expanded="${open}">${open?'▼':'▶'}</button>
-      <div class="emain">${fT(n.id,'title',n.title,'タイトルを入力','t')}${fA(n.id,'summary',n.summary,'概要を追加','s')}</div></div>`;
+    h += `<div class="ehead" data-row="${n.id}">${fT(n.id,'title',n.title,'タイトルを入力','t')}${fA(n.id,'summary',n.summary,'概要を追加','s')}
+      <div class="tgrow"><button type="button" class="lnk tgl" data-act="toggleDetail" data-id="${n.id}" aria-expanded="${open}"><span class="tri" aria-hidden="true">${open?'▼':'▶'}</span>${open?'詳細を閉じる':'詳細を開く'}</button></div></div>`;
     if(open){
       h += `<div class="edetail">${fA(n.id,'detail',n.detail,'内容を追加','d')}${relHtml(n)}`;
       if(sceneOpen) h += `<div class="scene">${SCENE_FIELDS.map(([k,l,ph]) => `<div class="sf"><div class="sl">${l}</div>${fA(n.id,'scene.'+k,n.scene[k],ph,'d',l)}</div>`).join('')}</div>`;
@@ -10784,14 +10873,14 @@ function createPlotV2View(host, api){
   }
   function renderGroup(n, depth){
     const cnt = n.children.length, col = !!ui.col[n.id], showSt = !!ui.st[n.id];
-    let h = `<div class="card group ${depth % 2 ? 'odd' : 'even'}${depth >= 2 ? ' deep2' : ''}" data-node="${n.id}"><div class="ghead" data-row="${n.id}">
-      <div class="gleft"><button class="tog" data-act="toggle" data-id="${n.id}" aria-label="${col?'開く':'閉じる'}" aria-expanded="${!col}">${col?'▶':'▼'}</button>${fT(n.id,'label',n.label,'区分名','lb',`width:${labelW(n.label)}em`)}</div>
-      <div class="gright"><div class="trow">${fT(n.id,'title',n.title,'タイトルを入力','t')}${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}</div>${fA(n.id,'summary',n.summary,'概要を追加','s')}</div>
-      <button class="lnk gact" data-act="toggleStruct" data-id="${n.id}" aria-pressed="${showSt}">${showSt?'✓ ':''}構成</button></div>`;
+    let h = `<div class="card group ${depth % 2 ? 'odd' : 'even'}${depth >= 2 ? ' deep2' : ''}${depth >= 4 ? ' deep4' : ''}" data-node="${n.id}"><div class="ghead" data-row="${n.id}">
+      <div class="grow1">${depth >= 3 ? `<span class="lvl" title="${depth + 1}階層目">${depth + 1}階層</span>` : ''}${fT(n.id,'label',n.label,'区分名','lb')}${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}<button type="button" class="lnk gact" data-act="toggleStruct" data-id="${n.id}" aria-pressed="${showSt}">${showSt?'✓ ':''}構成</button></div>
+      ${fT(n.id,'title',n.title,'タイトルを入力','t')}${fA(n.id,'summary',n.summary,'概要を追加','s')}
+      <div class="tgrow"><button type="button" class="lnk tgl" data-act="toggle" data-id="${n.id}" aria-expanded="${!col}"><span class="tri" aria-hidden="true">${col?'▶':'▼'}</span>${col?'中身を開く':'中身を閉じる'}</button></div></div>`;
     if(!col) h += `<div class="gbody">${showSt ? strBar(n) : ''}${renderList(n.children, n.id, depth + 1)}</div>`;
     return h + `</div>`;
   }
-  const listCls = (parentId, depth) => `list-stack ${parentId ? 'nest' : 'top'}${depth >= 3 ? ' deep' : ''}`;
+  const listCls = (parentId, depth) => `list-stack ${parentId ? 'nest' : 'top'}${depth >= 3 ? ' deep' : ''}${depth >= 5 ? ' cap' : ''}`;
   function renderList(list, parentId, depth){
     let h = `<div class="${listCls(parentId, depth)}">`;
     list.forEach(n => { h += n.kind === 'group' ? renderGroup(n, depth) : renderEvent(n); });
@@ -10806,14 +10895,16 @@ function createPlotV2View(host, api){
   }
   function renderMoveEvent(n){
     const sel = mv.sel === n.id;
-    return `<div class="card event mv${sel?' sel':''}" data-node="${n.id}"><div class="ehead"><span class="tgsp"></span>
-      <div class="emain mvtap" data-act="mvSel" data-id="${n.id}" role="button" tabindex="0" aria-pressed="${sel}"><div class="ttl${n.title.trim()?'':' empty'}">${orUndecided(n.title)}</div>${n.summary.trim()?`<div class="sum clamp">${esc(n.summary)}</div>`:''}</div></div></div>${sel?mvActions(n.id):''}`;
+    return `<div class="card event mv${sel?' sel':''}" data-node="${n.id}"><div class="ehead">
+      <div class="mvtap" data-act="mvSel" data-id="${n.id}" role="button" tabindex="0" aria-pressed="${sel}"><div class="ttl${n.title.trim()?'':' empty'}">${orUndecided(n.title)}</div>${n.summary.trim()?`<div class="sum clamp">${esc(n.summary)}</div>`:''}</div></div></div>${sel?mvActions(n.id):''}`;
   }
   function renderMoveGroup(n, depth){
     const sel = mv.sel === n.id, col = !!mv.col[n.id], cnt = n.children.length;
-    let h = `<div class="card group mv ${depth % 2 ? 'odd' : 'even'}${depth >= 2 ? ' deep2' : ''}" data-node="${n.id}"><div class="ghead${sel?' sel':''}">
-      <div class="gleft"><button class="tog" data-act="mvToggle" data-id="${n.id}" aria-label="${col?'開く':'閉じる'}" aria-expanded="${!col}">${col?'▶':'▼'}</button><span class="lbl mvtap" data-act="mvSel" data-id="${n.id}" role="button" tabindex="0" aria-pressed="${sel}">${n.label.trim()?esc(n.label):'区分'}</span></div>
-      <div class="gright mvtap" data-act="mvSel" data-id="${n.id}" role="button" tabindex="0"><div class="ttl${n.title.trim()?'':' empty'}">${orUndecided(n.title)}${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}</div>${n.summary.trim()?`<div class="sum clamp">${esc(n.summary)}</div>`:''}</div></div>`;
+    let h = `<div class="card group mv ${depth % 2 ? 'odd' : 'even'}${depth >= 2 ? ' deep2' : ''}${depth >= 4 ? ' deep4' : ''}" data-node="${n.id}"><div class="ghead${sel?' sel':''}">
+      <div class="mvtap" data-act="mvSel" data-id="${n.id}" role="button" tabindex="0" aria-pressed="${sel}">
+        <div class="grow1">${depth >= 3 ? `<span class="lvl">${depth + 1}階層</span>` : ''}<span class="lbl">${n.label.trim()?esc(n.label):'区分'}</span>${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}</div>
+        <div class="ttl${n.title.trim()?'':' empty'}">${orUndecided(n.title)}</div>${n.summary.trim()?`<div class="sum clamp">${esc(n.summary)}</div>`:''}</div>
+      <div class="tgrow"><button type="button" class="lnk tgl" data-act="mvToggle" data-id="${n.id}" aria-expanded="${!col}"><span class="tri" aria-hidden="true">${col?'▶':'▼'}</span>${col?'中身を開く':'中身を閉じる'}</button></div></div>`;
     if(sel) h += mvActions(n.id);
     if(!col) h += `<div class="gbody">${renderMoveList(n.children, n.id, depth + 1)}</div>`;
     return h + `</div>`;
@@ -10889,6 +10980,7 @@ function createPlotV2View(host, api){
       (empty && !move ? `<div class="emptyall">新プロットはまだ空です。「＋ 追加」から、まとまり（巻・章など）や出来事を追加できます。</div>` : '') +
       `<div id="view"><div class="trunk"><div class="card endcap">開始</div>${move ? renderMoveList(model.items, null, 0) : renderList(model.items, null, 0)}<div class="card endcap">終了</div></div></div>`;
     if(!move) growAll();
+    paintIcons();
     window.scrollTo(0, y);
   }
   function autoGrow(el){ el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
@@ -10949,7 +11041,7 @@ function createPlotV2View(host, api){
 
   /* ---------- モーダル・トースト ---------- */
   function closeModal(){ mroot.innerHTML = ''; if(modalY !== null){ window.scrollTo(0, modalY); modalY = null; } }
-  function openModal(html){ if(!mroot.firstChild) modalY = window.scrollY; mroot.innerHTML = `<div class="overlay" data-act="overlay"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`; }
+  function openModal(html){ if(!mroot.firstChild) modalY = window.scrollY; mroot.innerHTML = `<div class="overlay" data-act="overlay"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`; paintIcons(); }
   function toast(msg){ troot.innerHTML = `<div class="toast">${esc(msg)}</div>`; clearTimeout(toast.t); toast.t = setTimeout(()=>{ troot.innerHTML = ''; }, 2200); }
   function askDlg(title, bodyHtml, okLabel, onOk, danger){
     pendingOk = onOk;
@@ -10962,6 +11054,7 @@ function createPlotV2View(host, api){
     const where = `追加先：${parent ? `「${esc(plain(parent))}」の中` : '作品直下'}・${afterId ? `「${esc(plain(find(afterId).node))}」の後ろ` : '先頭'}${(!afterId && pvListOf(model.items, parentId||null).length===0) ? '（まだ空です）' : ''}`;
     openModal(`<h2>追加</h2><div class="where">${where}</div>
       <div class="kindsel"><button type="button" data-act="kind" data-kind="group">まとまり</button><button type="button" class="on" data-act="kind" data-kind="event">出来事</button></div>
+      <div class="kinddesc"><div data-kd="group"><b>まとまり</b>：巻・章・話など、出来事をまとめる入れ物</div><div data-kd="event" class="on"><b>出来事</b>：物語で起きること・場面</div></div>
       <div class="field" id="f_label_wrap" style="display:none"><label>区分名（巻・章・話など自由に。空でも可）</label><input id="f_label" type="text" placeholder="例：3章"></div>
       <div class="field"><label>タイトル（空でも可）</label><input id="f_title" type="text"></div>
       <div class="field"><label>短い概要（任意）</label><input id="f_sum" type="text"></div>
@@ -11009,8 +11102,8 @@ function createPlotV2View(host, api){
     const n = find(id).node, cands = type === 'chars' ? ctx.chars : ctx.places, cur = n[type];
     const known = new Set(cands.map(c => c.id)), unknown = cur.filter(x => !known.has(x));
     openModal(`<h2>${type==='chars'?'キャラクター':'場所'}を選ぶ</h2><div class="hint">${cands.length ? 'このアプリに登録されている一覧です。タップで追加／解除できます。' : `${type==='chars'?'キャラクター':'場所'}がまだ登録されていません。先に設定から登録してください。`}</div>
-      ${cands.map(c => `<button class="pick${cur.includes(c.id)?' on':''}" data-act="pickToggle" data-id="${id}" data-type="${type}" data-cid="${esc(c.id)}"><span class="av${type==='places'?' place':''}" style="${type==='places'?'':`background:${c.color};`}">${esc(c.icon)}</span><span>${esc(c.name)}</span><span class="ck">${cur.includes(c.id)?'✓ 追加済み':''}</span></button>`).join('')}
-      ${unknown.map(u => `<button class="pick on" data-act="pickToggle" data-id="${id}" data-type="${type}" data-cid="${esc(u)}"><span class="av place">？</span><span>登録の無い項目（削除された可能性）</span><span class="ck">✓ タップで解除</span></button>`).join('')}
+      ${cands.map(c => `<button class="pick${cur.includes(c.id)?' on':''}" data-act="pickToggle" data-id="${id}" data-type="${type}" data-cid="${esc(c.id)}">${avatar(c, type==='places'?'place':'')}<span class="pname">${esc(c.name)}</span><span class="ck">${cur.includes(c.id)?'✓ 追加済み':''}</span></button>`).join('')}
+      ${unknown.map(u => `<button class="pick on" data-act="pickToggle" data-id="${id}" data-type="${type}" data-cid="${esc(u)}"><span class="av place"><span class="avph">？</span></span><span class="pname">登録の無い項目（削除された可能性）</span><span class="ck">✓ タップで解除</span></button>`).join('')}
       <div class="foot"><button class="btn primary" data-act="close">閉じる</button></div>`);
   }
 
@@ -11081,6 +11174,7 @@ function createPlotV2View(host, api){
       case 'kind': {
         pendingAdd.kind = t.dataset.kind;
         mroot.querySelectorAll('.kindsel button').forEach(b => b.classList.toggle('on', b === t));
+        mroot.querySelectorAll('.kinddesc [data-kd]').forEach(d => d.classList.toggle('on', d.dataset.kd === t.dataset.kind));
         root.getElementById('f_label_wrap').style.display = t.dataset.kind === 'group' ? '' : 'none'; break;
       }
       case 'addOk': {
@@ -11178,9 +11272,9 @@ function createPlotV2View(host, api){
     const f = t.dataset && t.dataset.f; if(!f || !model) return false;
     const info = find(t.dataset.id); if(!info) return false;
     const n = info.node;
+    if((f === 'title' || f === 'label') && /[\r\n]/.test(t.value)) t.value = t.value.replace(/[\r\n]+/g, ' '); // タイトル・区分名は複数行に折り返して表示するが、改行そのものは入れない
     if(f.startsWith('scene.')){ if(n.kind==='event') n.scene[f.slice(6)] = t.value; } else if(f==='label'||f==='title'||f==='summary'||f==='detail') n[f] = t.value;
     if(t.tagName === 'TEXTAREA') autoGrow(t);
-    if(f === 'label') t.style.width = labelW(t.value) + 'em';
     touch();
     return true;
   }
@@ -11203,9 +11297,9 @@ function createPlotV2View(host, api){
   root.addEventListener('keydown', e => {
     const t = e.target; if(!t.dataset || !t.dataset.f || e.isComposing || composing) return;
     if(e.key === 'Escape'){ t.blur(); return; }
-    if(e.key === 'Enter' && t.tagName === 'INPUT'){
+    if(e.key === 'Enter' && (t.dataset.f === 'title' || t.dataset.f === 'label')){
       e.preventDefault();
-      const box = t.closest('.ghead, .ehead'), next = t.dataset.f === 'label' ? box.querySelector('input[data-f=title]') : box.querySelector('textarea[data-f=summary]');
+      const box = t.closest('.ghead, .ehead'), next = box.querySelector(t.dataset.f === 'label' ? 'textarea[data-f=title]' : 'textarea[data-f=summary]');
       if(next) next.focus();
     }
   });
@@ -11216,8 +11310,9 @@ function createPlotV2View(host, api){
   /* ---------- 外から呼ぶ口 ---------- */
   return {
     sync(plot, err, chars, places){
+      const prevSig = JSON.stringify(ctx);
       ctx = {
-        chars: (chars||[]).map(c => ({ id:c.id, name:c.name || '（名前なし）', icon:Array.from(c.name || '？')[0], color:colorOf(c.id) })),
+        chars: (chars||[]).map(c => ({ id:c.id, name:c.name || '（名前なし）', imageId:c.iconImageId || c.image || null })),
         places: (places||[]).map(p => ({ id:p.id, name:p.name || '（名前なし）', icon:'📍' })),
       };
       if(err){ errState = err; model = null; lastCommitted = null; dirty = false; clearTimeout(timer); closeModal(); render(); return; }
@@ -11227,6 +11322,8 @@ function createPlotV2View(host, api){
         model = clone(plot); lastCommitted = plot;
         mode = 'normal'; mv = { sel:null, col:{} }; mroot.innerHTML = ''; modalY = null;
         render();
+      } else if(model && prevSig !== JSON.stringify(ctx) && !composing && !(root.activeElement && /^(INPUT|TEXTAREA)$/.test(root.activeElement.tagName))){
+        render(); // キャラ名・アイコンの変更を反映（入力中は触らない）
       }
     },
     destroy(){
