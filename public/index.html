@@ -911,6 +911,42 @@
     .writing-tools-drawer .snippet-palette-body{ overflow-y:hidden; }
     .writing-tools-head .snippet-palette-head-actions .btn{ min-height:36px; padding:4px 10px; font-size:13px; }
   }
+
+  /* ===== プロット内の執筆モーダル ===== */
+  .pw-root{ position:fixed; left:0; right:0; z-index:200; background:#fffdf8; display:flex; flex-direction:column; overscroll-behavior:contain; }
+  .pw-head{ flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--line); background:#fffdf8; }
+  .pw-title{ flex:1 1 auto; min-width:0; }
+  .pw-title b{ display:block; font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pw-title small{ display:block; font-size:11px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pw-save{ flex:0 0 auto; font-size:11.5px; color:var(--ink-soft); white-space:nowrap; }
+  .pw-save.err{ color:#8a3a3a; font-weight:700; }
+  .pw-saveerr{ flex:0 0 auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fbeeee; border-bottom:1px solid #dbb; color:#8a3a3a; font-size:12.5px; padding:6px 10px; }
+  .pw-bar{ flex:0 0 auto; display:flex; align-items:center; gap:6px; padding:6px 10px; overflow-x:auto; -webkit-overflow-scrolling:touch; border-bottom:1px solid var(--line); }
+  .pw-bar .btn{ flex:0 0 auto; white-space:nowrap; min-height:36px; }
+  .pw-char{ display:inline-flex; align-items:center; gap:4px; }
+  .pw-body{ flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+  .pw-main{ flex:1 1 auto; min-height:0; display:flex; }
+  .pw-area{ flex:1 1 auto; width:100%; height:100%; min-height:0; resize:none; border:none; border-radius:0; outline:none; padding:14px 14px calc(14px + env(safe-area-inset-bottom)); line-height:2; background:#fffdf8; color:var(--ink); font-family:inherit; }
+  .pw-side{ display:none; order:-1; flex:0 0 auto; max-height:38%; overflow-y:auto; -webkit-overflow-scrolling:touch; border-bottom:1px solid var(--line); padding:8px 10px; background:#faf7ef; }
+  .pw-side.open{ display:block; }
+  .pw-sec + .pw-sec{ margin-top:8px; }
+  .pw-sl{ font-size:11px; color:var(--ink-soft); margin-bottom:2px; }
+  .pw-st{ font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .pw-none{ color:var(--ink-soft); }
+  .pw-imgs{ display:flex; flex-wrap:wrap; gap:8px; }
+  .pw-thumbw{ width:96px; }
+  .pw-thumb{ display:flex; align-items:center; justify-content:center; width:96px; height:96px; padding:0; border:1px solid var(--line); border-radius:8px; background:#eae4d6; overflow:hidden; }
+  .pw-thumb img{ max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; }
+  .pw-ph{ font-size:11px; color:var(--ink-soft); text-align:center; padding:4px; }
+  .pw-cap{ display:block; font-size:10.5px; color:var(--ink-soft); line-height:1.3; margin-top:2px; overflow-wrap:anywhere; }
+  .pw-lb{ position:absolute; inset:0; z-index:120; background:rgba(20,18,16,.92); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:12px; }
+  .pw-lb img{ max-width:100%; max-height:80%; object-fit:contain; }
+  .pw-lbcap{ color:#eee; font-size:13px; }
+  @media (min-width:820px){
+    .pw-body{ flex-direction:row; max-width:1180px; width:100%; margin:0 auto; }
+    .pw-side{ display:block; order:2; flex:0 0 300px; max-height:none; border-bottom:none; border-left:1px solid var(--line); }
+    .pw-sidebtn{ display:none; }
+  }
 </style>
 </head>
 
@@ -2085,6 +2121,54 @@ function normalizeDraftEntry(d){
     deleted: !!d.deleted,
     deletedAt: d.deletedAt ? String(d.deletedAt) : null,
   };
+}
+
+/* ---- 下書きの更新・履歴（共通処理）：執筆画面とプロットの執筆モーダルが同じ関数を使う ----
+   どれも「dataを受け取って新しいdataを返す」形で、setData(d=>...) の更新関数の中で使う。
+   対象の下書き1件だけを書き換えるので、古い画面内データで下書き全体を上書きしない。 */
+const DRAFT_HISTORY_MAX = 5; // 履歴は直近5世代まで
+function draftMap(d, draftId, fn){
+  return { ...d, drafts:(d.drafts||[]).map(x => x.id===draftId ? fn(x) : x) };
+}
+// 本文の更新（履歴は触らない＝入力ごとに履歴を埋めない）
+function draftApplyBody(d, draftId, body){
+  return draftMap(d, draftId, x => (x.body===body ? x : { ...x, body, updatedAt:new Date().toISOString() }));
+}
+function draftApplyTitle(d, draftId, title){
+  return draftMap(d, draftId, x => ({ ...x, title, updatedAt:new Date().toISOString() }));
+}
+// 直前版の記録。直前と同じ内容なら追加しない。最新5件まで（古いものから捨てる）。
+function draftPushHistory(d, draftId, body){
+  return draftMap(d, draftId, x => {
+    if(x.history[0] && x.history[0].body===body) return x;
+    return { ...x, history:[{ body, savedAt:new Date().toISOString() }, ...x.history].slice(0, DRAFT_HISTORY_MAX) };
+  });
+}
+// 現在の本文を、直前版と違う時だけ履歴へ積む（定期記録・モーダルを閉じる時に使う）
+function draftSnapshotIfChanged(d, draftId){
+  const x = (d.drafts||[]).find(v => v.id===draftId);
+  if(!x) return d;
+  if(x.history[0] && x.history[0].body===x.body) return d;
+  return draftPushHistory(d, draftId, x.body);
+}
+// 履歴の版へ戻す。現在の内容も、消えないよう先に履歴へ積んでから置き換える。
+function draftRestoreHistory(d, draftId, entry){
+  return draftMap(d, draftId, x => {
+    const keep = (x.history[0] && x.history[0].body===x.body) ? x.history : [{ body:x.body, savedAt:new Date().toISOString() }, ...x.history].slice(0, DRAFT_HISTORY_MAX);
+    return { ...x, body:entry.body, updatedAt:new Date().toISOString(), history:keep };
+  });
+}
+// 下書きID → その下書きを関連付けているプロットの出来事（名前はIDから都度取得するので、名前変更に追従する）
+function plotV2DraftUsers(plot){
+  const map = new Map();
+  const walk = (list) => (list||[]).forEach(n => {
+    if(n.kind==='group'){ walk(n.children); return; }
+    if(!n.draftId) return;
+    if(!map.has(n.draftId)) map.set(n.draftId, []);
+    map.get(n.draftId).push({ id:n.id, title:(n.title||'').trim() || '未定' });
+  });
+  walk(plot && plot.items);
+  return map;
 }
 
 // 既存データを壊さないための不足フィールド補完。
@@ -4512,7 +4596,7 @@ function makeCharacterAssessment(ch){
 }
 
 /* ---- キャラクター ---- */
-function CharacterDetail({ data, id, updateItem, deleteItem, onBack, allOrgs, allLocations, allTimeline }){
+function CharacterDetail({ data, id, updateItem, deleteItem, onBack, backLabel, allOrgs, allLocations, allTimeline }){
   const ch = data.characters.find(c=>c.id===id);
   if(!ch) return null;
   const patch = (p) => updateItem('characters', id, p);
@@ -4550,7 +4634,7 @@ function CharacterDetail({ data, id, updateItem, deleteItem, onBack, allOrgs, al
 
   return (
     <div>
-      <div className="breadcrumb"><button onClick={onBack}>← キャラクター一覧</button></div>
+      <div className="breadcrumb"><button onClick={onBack}>← {backLabel||'キャラクター一覧'}</button></div>
       <div className="toolbar">
         <input className="proj-title" style={{fontSize:20, flex:1}} value={ch.name} placeholder="呼ぶ名前（作中で主に使う名前）"
           onChange={e=>patch({name:e.target.value})} />
@@ -5514,6 +5598,9 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const liveDrafts = (data.drafts||[]).filter(d=>!d.deleted);
   const trashedDrafts = (data.drafts||[]).filter(d=>d.deleted);
   const activeDraft = liveDrafts.find(d=>d.id===data.activeDraftId) || null;
+  // この下書きを関連付けているプロットの出来事（名前はIDから都度取得＝名前変更に追従）。表示のみで、データは書き換えない。
+  const draftUsers = useMemo(()=>plotV2DraftUsers(data.plotV2), [data.plotV2]);
+  const draftUsersLabel = (id) => { const u = draftUsers.get(id); return u && u.length ? u.map(x=>x.title).join('、') : ''; };
 
   const selectedDraftText=()=>{
     const el=textareaRef.current, body=activeDraft?activeDraft.body:'';
@@ -5521,34 +5608,27 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   };
   // 直前版の記録。履歴は最新5件まで（古いものから捨てる）。直前と同じ内容なら追加しない。
   const pushDraftHistory=(draftId,body)=>{
-    setData(d=>({...d,drafts:(d.drafts||[]).map(x=>{
-      if(x.id!==draftId)return x;
-      if(x.history[0]&&x.history[0].body===body)return x;
-      return {...x,history:[{body,savedAt:new Date().toISOString()},...x.history].slice(0,5)};
-    })}));
+    setData(d=>draftPushHistory(d,draftId,body)); // 共通処理（プロットの執筆モーダルと同じ）
   };
   // 自動保存とは別に、下書きを開いている間は20秒おきに変更があれば直前版として記録する（最低5世代保持）。
   useEffect(()=>{
     if(workspaceTab!=='draft'||!activeDraft)return;
     const draftId=activeDraft.id;
     const timer=setInterval(()=>{
-      setData(d=>{
-        const x=(d.drafts||[]).find(v=>v.id===draftId);
-        if(!x)return d;
-        if(x.history[0]&&x.history[0].body===x.body)return d;
-        return {...d,drafts:d.drafts.map(v=>v.id===draftId?{...v,history:[{body:v.body,savedAt:new Date().toISOString()},...v.history].slice(0,5)}:v)};
-      });
+      setData(d=>draftSnapshotIfChanged(d,draftId));
     },20000);
     return ()=>clearInterval(timer);
   },[workspaceTab,activeDraft&&activeDraft.id]);
 
   const setDraftBody=(text)=>{
     if(!activeDraft)return;
-    setData(d=>({...d,drafts:(d.drafts||[]).map(x=>x.id===activeDraft.id?{...x,body:text,updatedAt:new Date().toISOString()}:x)}));
+    const id=activeDraft.id;
+    setData(d=>draftApplyBody(d,id,text));
   };
   const setDraftTitle=(title)=>{
     if(!activeDraft)return;
-    setData(d=>({...d,drafts:(d.drafts||[]).map(x=>x.id===activeDraft.id?{...x,title,updatedAt:new Date().toISOString()}:x)}));
+    const id=activeDraft.id;
+    setData(d=>draftApplyTitle(d,id,title));
   };
   const openDraft=(id)=>{ setDraftMenuOpen(false); setFlowOpen(false);setExprDictOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:id})); };
   const backToDraftList=()=>{ setDraftMenuOpen(false); setFlowOpen(false);setExprDictOpen(false);setDraftHistoryOpen(false); hasCursorInfoRef.current=false; setData(d=>({...d,activeDraftId:null})); };
@@ -5595,11 +5675,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   const restoreDraftHistory=(entry)=>{
     if(!activeDraft)return;
     if(!confirm(`下書き「${activeDraft.title}」を、${new Date(entry.savedAt).toLocaleString('ja-JP')}時点の内容に置き換えますか？\n（現在の内容は置き換え前に履歴へ保存されます）`))return;
-    setData(d=>({...d,drafts:d.drafts.map(x=>{
-      if(x.id!==activeDraft.id)return x;
-      const keepCurrent=(x.history[0]&&x.history[0].body===x.body)?x.history:[{body:x.body,savedAt:new Date().toISOString()},...x.history].slice(0,5);
-      return {...x,body:entry.body,updatedAt:new Date().toISOString(),history:keepCurrent};
-    })}));
+    const id=activeDraft.id;
+    setData(d=>draftRestoreHistory(d,id,entry));
     setDraftHistoryOpen(false);
     showDraftToast('選んだ版に置き換えました');
   };
@@ -6249,6 +6326,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
                 <strong>{d.title}</strong>
                 <small>{new Date(d.updatedAt).toLocaleString('ja-JP')}・{d.body.length}文字{d.sourceType?(d.sourceType==='passage'?'・塊から':'・本文から'):''}</small>
                 <span>{d.body.slice(0,60)||'（本文なし）'}</span>
+                {draftUsersLabel(d.id) && <small style={{display:'block',opacity:.75}}>プロットの出来事：{draftUsersLabel(d.id)}</small>}
               </button>
               <div className="writing-block-actions">
                 <button type="button" className="btn btn-sm" onClick={()=>openRenameDraft(d)}>見出し変更</button>
@@ -6304,6 +6382,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
             </>)}
           </div>
         </div>
+        {draftUsersLabel(activeDraft.id) && <div className="hint" style={{margin:'0 0 6px',fontSize:12,color:'var(--ink-soft)'}}>プロットの出来事：{draftUsersLabel(activeDraft.id)}（同じ文章をプロットの執筆モーダルでも編集できます）</div>}
         <textarea id="drafting-area" ref={textareaRef} className="writing-body-area" style={{fontSize:writingFontSize}} value={draftBody}
           onChange={e=>{ setDraftBody(e.target.value); rememberEditorState(); }}
           onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState}
@@ -10278,7 +10357,19 @@ function plotV2IdList(o, k, path){
   v.forEach((x,i)=>{ if(typeof x !== 'string') throw new Error(`${path}.${k}[${i}] が文字列ではありません`); });
   return v.slice();
 }
-// 検証＋正規化。成功時は { ok:true, value }（ID・並び・入れ子・文章・関連ID・構成端点をそのまま保つ）。失敗時は { ok:false, message }。
+// 参考画像：[{ id:画像ID, memo:短いメモ }]。無い（旧データ）なら空。画像本体はimageStorageにあり、ここには持たない。
+function plotV2Images(o, path){
+  const v = o.images;
+  if(v===undefined || v===null) return [];
+  if(!Array.isArray(v)) throw new Error(`${path}.images が配列ではありません`);
+  return v.map((x, i) => {
+    const q = `${path}.images[${i}]`;
+    if(!x || typeof x!=='object' || Array.isArray(x)) throw new Error(`${q} がオブジェクトではありません`);
+    if(typeof x.id!=='string' || !x.id) throw new Error(`${q} の画像IDがありません`);
+    return { id:x.id, memo:plotV2Str(x,'memo',q) };
+  });
+}
+// 検証＋正規化。成功時は { ok:true, value }（ID・並び・入れ子・文章・関連ID・下書きID・参考画像・構成端点をそのまま保つ）。失敗時は { ok:false, message }。
 function validatePlotV2(raw){
   try{
     if(!raw || typeof raw!=='object' || Array.isArray(raw)) return plotV2Fail('新プロットのデータがオブジェクトではありません。');
@@ -10308,7 +10399,8 @@ function validatePlotV2(raw){
           if(sc!==undefined && sc!==null && (typeof sc!=='object' || Array.isArray(sc))) throw new Error(`${p}.scene がオブジェクトではありません`);
           const scene = {}; PLOTV2_SCENE_KEYS.forEach(k => { scene[k] = plotV2Str(sc||{}, k, `${p}.scene`); });
           return { id:n.id, kind:'event', title:plotV2Str(n,'title',p), summary:plotV2Str(n,'summary',p), detail:plotV2Str(n,'detail',p),
-            chars:plotV2IdList(n,'chars',p), places:plotV2IdList(n,'places',p), scene };
+            chars:plotV2IdList(n,'chars',p), places:plotV2IdList(n,'places',p), scene,
+            draftId:plotV2Str(n,'draftId',p), images:plotV2Images(n,p) };
         }
         throw new Error(`${p}.kind が group / event のどちらでもありません`);
       });
@@ -10409,7 +10501,7 @@ function pvShift(items, id, dir){ // 同じ親の中で一つ入れ替える（�
 }
 function pvMakeGroup(label, title, summary){ return { id:uid('pvg'), kind:'group', label:label||'', title:title||'', summary:summary||'', children:[] }; }
 function pvMakeEvent(title, summary){
-  return { id:uid('pve'), kind:'event', title:title||'', summary:summary||'', detail:'', chars:[], places:[], scene:{ goal:'', obstacle:'', change:'', memo:'' } };
+  return { id:uid('pve'), kind:'event', title:title||'', summary:summary||'', detail:'', chars:[], places:[], scene:{ goal:'', obstacle:'', change:'', memo:'' }, draftId:'', images:[] };
 }
 function pvPlain(n){ return (n.kind === 'group' ? [n.label, n.title].filter(x=>x&&x.trim()).join(' ') : n.title) || '未定'; }
 
@@ -10467,19 +10559,19 @@ function pvCheckList(plot){
 
 /* ---- 端末内の表示設定（カード/ライン・通常時の開閉・構成帯の表示）。作品データとは別保存 ---- */
 function loadPlotV2Ui(){
-  const def = { view:'card', col:{}, ev:{}, sc:{}, st:{} };
+  const def = { view:'card', col:{}, ev:{}, sc:{}, st:{}, rh:false };
   try{
     const o = JSON.parse(localStorage.getItem(PLOTV2_UI_KEY) || 'null');
     if(!o || typeof o!=='object') return def;
     const m = (x) => (x && typeof x==='object' && !Array.isArray(x)) ? x : {};
-    return { view:o.view==='line'?'line':'card', col:m(o.col), ev:m(o.ev), sc:m(o.sc), st:m(o.st) };
+    return { view:o.view==='line'?'line':'card', col:m(o.col), ev:m(o.ev), sc:m(o.sc), st:m(o.st), rh:!!o.rh };
   }catch(e){ return def; }
 }
 function savePlotV2Ui(ui, items){
   try{
     const alive = new Set(); pvForEach(items, n => alive.add(n.id));
     const keep = (o) => { const r = {}; Object.keys(o).forEach(k => { if(alive.has(k) && o[k]) r[k] = true; }); return r; };
-    localStorage.setItem(PLOTV2_UI_KEY, JSON.stringify({ view:ui.view, col:keep(ui.col), ev:keep(ui.ev), sc:keep(ui.sc), st:keep(ui.st) }));
+    localStorage.setItem(PLOTV2_UI_KEY, JSON.stringify({ view:ui.view, col:keep(ui.col), ev:keep(ui.ev), sc:keep(ui.sc), st:keep(ui.st), rh:!!ui.rh }));
   }catch(e){}
 }
 
@@ -10694,7 +10786,7 @@ const PLOTV2_CSS = String.raw`
   .grow1{ display:flex; flex-wrap:wrap; align-items:center; gap:0 8px; min-width:0; }
   .grow1 .inl.lb{ flex:1 1 4.6em; width:auto; min-width:4.2em; max-width:100%; margin:0 0 0 -4px; min-height:32px; }
   .grow1 .cnt{ margin-left:0; }
-  .grow1 .gact{ margin-left:auto; }
+  .grow1 .gacts{ margin-left:auto; }
   .grow1 .lbl{ flex:1 1 4.6em; min-width:4.2em; overflow-wrap:anywhere; }
   .lvl{ flex:0 0 auto; font-size:10.5px; color:var(--ink-soft); border:1px solid #cfe4d8; background:#fff; border-radius:8px; padding:0 6px; white-space:nowrap; }
   .inl.t{ text-overflow:clip; white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -10758,7 +10850,53 @@ const PLOTV2_CSS = String.raw`
     .v-card .endcap{ padding:6px 12px; }
     .v-line .list-stack.cap{ padding-left:4px; }
     .modal{ padding:12px; }
+    .rd-bar{ margin:0 -8px 6px; padding:6px 8px; }
   }
+
+  /* ===== 文章プレビュー・参考画像・通し読み（プロット内の執筆） ===== */
+  .wblock{ margin-top:2px; }
+  .wmeta{ font-size:11.5px; color:var(--ink-soft); margin:0 0 2px; overflow-wrap:anywhere; }
+  .wprev{ display:block; width:100%; text-align:left; border:1px solid transparent; background:rgba(255,255,255,.55); border-radius:10px; padding:6px 8px; min-height:44px; color:inherit; font:inherit; cursor:pointer; }
+  .v-line .wprev{ background:rgba(255,255,255,.7); }
+  .wprev:active{ background:rgba(31,122,99,.10); }
+  .wprev:focus-visible{ outline:2px solid var(--teal-soft); }
+  .wtxt{ display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.55; }
+  .wed{ display:block; text-align:right; font-size:11px; color:var(--teal); margin-top:1px; }
+  .wempty{ display:block; color:var(--teal); font-weight:600; font-size:14px; padding:4px 0; }
+  .wacts{ display:flex; flex-wrap:wrap; gap:0 4px; align-items:center; }
+  .wissue{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:6px 10px; font-size:13px; color:var(--danger); }
+  .wbk{ background:#f3efe6; border:1px dashed #bdb6a6; border-radius:10px; padding:6px 10px; margin:4px 0; }
+  .wbk .dtext{ font-size:13px; max-height:40vh; overflow:auto; }
+  .rimgs{ display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px; margin-top:6px; }
+  .rimgw{ width:64px; min-width:0; }
+  .rimgb{ position:relative; display:block; width:64px; height:64px; padding:0; border:1px solid #cfc8b6; border-radius:8px; background:#eae4d6; overflow:hidden; }
+  .rimgb .rimgimg{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .rimgph{ display:flex; align-items:center; justify-content:center; width:100%; height:100%; font-size:11px; color:var(--ink-soft); text-align:center; }
+  .rimgm{ display:block; font-size:10.5px; color:var(--ink-soft); line-height:1.3; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lbox{ display:flex; align-items:center; justify-content:center; min-height:120px; background:#1c1b19; border-radius:10px; padding:4px; }
+  .lbox .lbimg{ display:block; max-width:100%; max-height:60vh; width:auto; height:auto; object-fit:contain; }
+  .lbox .rimgph{ color:#ddd; min-height:120px; }
+  .pplb{ border:none; background:none; padding:0 4px 0 0; margin:0; min-height:36px; color:inherit; font:inherit; text-align:left; border-radius:18px; cursor:pointer; }
+  .pplb:active{ background:rgba(31,122,99,.12); }
+  .gacts{ display:inline-flex; align-items:center; margin-left:auto; }
+  .tb-read{ font-weight:700; }
+
+  /* 通し読み：本文だけを順番につなげて表示（概要・シーン設計・資料・参考画像は出さない） */
+  .rd-bar{ position:sticky; top:var(--pvtop,0px); z-index:20; display:flex; align-items:center; gap:8px; background:#eef6f1; border-bottom:1px solid #cfe4d8; margin:0 -10px 6px; padding:6px 10px; }
+  .rd-title{ font-family:"Hiragino Mincho ProN","Yu Mincho",serif; font-size:18px; font-weight:700; flex:1 1 auto; min-width:0; }
+  .rd-scope{ font-size:12px; color:var(--ink-soft); margin:2px 0 10px; display:flex; flex-wrap:wrap; align-items:center; gap:2px 8px; }
+  .rd-h{ font-family:"Hiragino Mincho ProN","Yu Mincho",serif; font-weight:700; color:#2f5a49; margin:18px 0 6px; padding-bottom:3px; border-bottom:1px solid #cfe4d8; overflow-wrap:anywhere; }
+  .rd-h0{ font-size:20px; } .rd-h1{ font-size:18px; } .rd-h2{ font-size:16px; } .rd-h3{ font-size:15px; }
+  .rd-ev{ margin:10px 0 14px; }
+  .rd-cap{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink-soft); }
+  .rd-cap .rd-ed{ margin-left:auto; }
+  .rd-sh{ border:1px solid #cfe4d8; background:#fff; border-radius:8px; padding:0 6px; font-size:10.5px; }
+  .rd-text{ white-space:pre-wrap; overflow-wrap:anywhere; font-family:"Hiragino Mincho ProN","Yu Mincho",serif; font-size:16px; line-height:1.95; margin-top:2px; }
+  .rd-empty{ display:flex; align-items:center; gap:8px; color:var(--ink-soft); font-size:13px; background:rgba(0,0,0,.035); border-radius:8px; padding:2px 8px; }
+  .rd-empty span{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
+  .rd-warn{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:6px 10px; }
+  .rd-warn .rd-state{ color:var(--danger); font-size:13px; }
+  .mode-read .toolbar,.mode-read .notice,.mode-read .linenote,.mode-read > .wrap > h1{ display:none; }
 `;
 
 /* ============ 新プロット：画面（最新試作の表示・操作を基準にする） ============
@@ -10770,16 +10908,20 @@ const PLOTV2_PALETTE = ['#2f73a3','#e0149f','#e8782a','#6a8a5a','#7a6aa8','#b07a
 
 function createPlotV2View(host, api){
   const root = host.attachShadow({ mode:'open' });
-  root.innerHTML = `<style>${PLOTV2_CSS}</style><div class="pv v-card"><div class="wrap"></div><div class="mroot"></div><div class="troot"></div></div>`;
+  root.innerHTML = `<style>${PLOTV2_CSS}</style><div class="pv v-card"><div class="wrap"></div><div class="mroot"></div><div class="troot"></div><input type="file" accept="image/*" id="refFile" hidden></div>`;
   const pv = root.querySelector('.pv'), wrap = root.querySelector('.wrap'), mroot = root.querySelector('.mroot'), troot = root.querySelector('.troot');
 
   let model = null, lastCommitted = null, errState = null;
-  const mine = new WeakSet(); // 自分が本体へ渡したデータ。React側の反映が遅れて古い自分のデータが戻ってきても、外部変更とは扱わない
+  const mine = new WeakSet(); // 自分が本体へ渡したデータ、および取り込み済みのデータ。React側の反映が遅れて古いデータが戻ってきても、外部変更とは扱わない（関連付けや入力が古い状態で巻き戻らないようにする）
   let ctx = { chars:[], places:[] };
   const ui = loadPlotV2Ui();
   let mode = 'normal', mv = { sel:null, col:{} };
   let dirty = false, timer = null, composing = false, destroyed = false;
   let stMap = {}, modalY = null, pendingAdd = null, pendingOk = null;
+  let dmap = new Map(), dsig = ''; // 下書き（文章の正本は本体の data.drafts。ここは表示用に参照するだけで、文章は持たない・書き換えない）
+  let writerOpen = false, lastLaunchVS = null, pendingImgEvent = null;
+  let reader = { scope:null }, readBack = null;
+  const bk = new Set(); // 「退避した元の文章」を開いている出来事（一時状態）
   const imgCache = new Map(), imgPending = new Set(); // キャラアイコン：画像IDごとの表示用URL（プロットには画像データを保存しない。既存の画像保存から都度取得）
 
   /* ---------- 保存への受け渡し ---------- */
@@ -10791,6 +10933,13 @@ function createPlotV2View(host, api){
     const obj = { schemaVersion:PLOTV2_VERSION, items:clone(model.items), structures:clone(model.structures) };
     lastCommitted = obj; mine.add(obj);
     api.setPlot(obj);
+  }
+  // 下書きを新しく作って出来事へ関連付ける時は、プロットの更新と下書きの追加を「1回のデータ更新」で本体へ渡す
+  function commitWithDraft(entry){
+    clearTimeout(timer); timer = null; dirty = false;
+    const obj = { schemaVersion:PLOTV2_VERSION, items:clone(model.items), structures:clone(model.structures) };
+    lastCommitted = obj; mine.add(obj);
+    api.setPlotAndDraft(obj, entry);
   }
   function touch(){ dirty = true; api.markDirty(); clearTimeout(timer); timer = setTimeout(commit, 250); }
   function changed(){ touch(); commit(); }
@@ -10805,21 +10954,27 @@ function createPlotV2View(host, api){
   const fT = (id, f, val, ph, cls) => `<textarea class="inl ag ${cls}" rows="1" data-f="${f}" data-id="${id}" placeholder="${ph}" aria-label="${ph}" autocomplete="off" enterkeyhint="next">${esc(val)}</textarea>`;
   const avatar = (c, cls) => `<span class="av ${cls||''}" data-img="${esc(c.imageId||'')}"><span class="avph">${cls==='place'?esc(c.icon):'?'}</span></span>`;
   // 取得済みの画像を表示へ反映。未取得なら既存の画像保存から読み込む（失敗・未登録は代替表示のまま。表示寸法は固定なのでレイアウトは動かない）
+  //   .av＝キャラアイコン／.rimgb＝参考画像のサムネイル／.lbox＝拡大表示。画像は別々に取得しても同じキャッシュを使う。
+  const IMG_CLS = { av:'avimg', rimgb:'rimgimg', lbox:'lbimg' };
   function paintIcons(){
-    root.querySelectorAll('.av[data-img]').forEach(el => {
+    root.querySelectorAll('.av[data-img], .rimgb[data-img], .lbox[data-img]').forEach(el => {
       const id = el.dataset.img; if(!id) return;
+      const kind = el.classList.contains('av') ? 'av' : el.classList.contains('rimgb') ? 'rimgb' : 'lbox';
       const u = imgCache.get(id);
-      if(u){ if(!el.querySelector('img')){ const im = document.createElement('img'); im.className = 'avimg'; im.alt = ''; im.src = u; el.textContent = ''; el.appendChild(im); } return; }
-      if(imgCache.has(id) || imgPending.has(id)) return;
+      if(u){ if(!el.querySelector('img')){ const im = document.createElement('img'); im.className = IMG_CLS[kind]; im.alt = kind==='av' ? '' : '参考画像'; im.src = u; el.textContent = ''; el.appendChild(im); } return; }
+      if(imgCache.has(id)){ if(kind!=='av' && !el.querySelector('.rimgph')) el.innerHTML = '<span class="rimgph">画像を読み込めません</span>'; return; }
+      if(imgPending.has(id)) return;
       imgPending.add(id);
       Promise.resolve().then(() => imageStorage.get(id)).then(x => imgCache.set(id, x || null), () => imgCache.set(id, null))
         .then(() => { imgPending.delete(id); if(!destroyed) paintIcons(); });
     });
   }
   root.addEventListener('error', e => {
-    const t = e.target; if(!t || !t.classList || !t.classList.contains('avimg')) return;
+    const t = e.target; if(!t || !t.classList) return;
+    const kind = t.classList.contains('avimg') ? 'av' : t.classList.contains('rimgimg') ? 'rimgb' : t.classList.contains('lbimg') ? 'lbox' : '';
+    if(!kind) return;
     const el = t.parentNode; if(el && el.dataset) imgCache.set(el.dataset.img, null);
-    if(el){ el.innerHTML = '<span class="avph">?</span>'; }
+    if(el){ el.innerHTML = kind==='av' ? '<span class="avph">?</span>' : '<span class="rimgph">画像を読み込めません</span>'; }
   }, true);
   const fA = (id, f, val, ph, cls, aria) => `<textarea class="inl ag ${cls}" rows="1" data-f="${f}" data-id="${id}" placeholder="${ph}" aria-label="${aria||ph}">${esc(val)}</textarea>`;
   const SCENE_FIELDS = [['goal','目的','目的を追加'],['obstacle','対立・障害','対立・障害を追加'],['change','場面で起きる変化','変化を追加'],['memo','自由メモ','メモを追加']];
@@ -10837,7 +10992,7 @@ function createPlotV2View(host, api){
     const chars = n.chars.map(id => ctx.chars.find(c => c.id === id)).filter(Boolean);
     const places = n.places.map(id => ctx.places.find(p => p.id === id)).filter(Boolean);
     const lostC = n.chars.length - chars.length, lostP = n.places.length - places.length;
-    const cs = chars.map(c => `<span class="ppl">${avatar(c)}<span class="pname">${esc(c.name)}</span></span>`).join('');
+    const cs = chars.map(c => `<button type="button" class="ppl pplb" data-act="openChar" data-cid="${esc(c.id)}" aria-label="${esc(c.name)}の設定を開く">${avatar(c)}<span class="pname">${esc(c.name)}</span></button>`).join('');
     const ps = places.map(p => `<span class="ppl">${avatar(p,'place')}<span class="pname">${esc(p.name)}</span></span>`).join('');
     const lc = lostC ? `<span class="none-txt">（登録の無い人物 ${lostC}件）</span>` : '', lp = lostP ? `<span class="none-txt">（登録の無い場所 ${lostP}件）</span>` : '';
     return `<div class="rline">${cs}${lc}${(chars.length||lostC)?'':'<span class="none-txt">キャラ未設定</span>'}<button class="lnk sm" data-act="pickDlg" data-id="${n.id}" data-type="chars" aria-label="キャラクターを追加・解除">＋ キャラ</button></div>
@@ -10850,13 +11005,205 @@ function createPlotV2View(host, api){
     h += `<div class="ehead" data-row="${n.id}">${fT(n.id,'title',n.title,'タイトルを入力','t')}${fA(n.id,'summary',n.summary,'概要を追加','s')}
       <div class="tgrow"><button type="button" class="lnk tgl" data-act="toggleDetail" data-id="${n.id}" aria-expanded="${open}"><span class="tri" aria-hidden="true">${open?'▼':'▶'}</span>${open?'詳細を閉じる':'詳細を開く'}</button></div></div>`;
     if(open){
-      h += `<div class="edetail">${fA(n.id,'detail',n.detail,'内容を追加','d')}${relHtml(n)}`;
+      h += `<div class="edetail">${writeBlockHtml(n)}${refImgsHtml(n)}${relHtml(n)}`;
       if(sceneOpen) h += `<div class="scene">${SCENE_FIELDS.map(([k,l,ph]) => `<div class="sf"><div class="sl">${l}</div>${fA(n.id,'scene.'+k,n.scene[k],ph,'d',l)}</div>`).join('')}</div>`;
       else if(n.scene.change.trim()) h += `<div class="scsum"><b>場面の変化</b>${esc(n.scene.change)}</div>`;
       h += `<div class="erow"><button class="lnk" data-act="toggleScene" data-id="${n.id}" aria-expanded="${sceneOpen}">シーン設計${sceneFilled(n)?'（入力あり）':''} ${sceneOpen?'⌄':'›'}</button></div></div>`;
     }
     return h + `</div>`;
   }
+  /* ---------- 文章（関連する下書き）・参考画像 ----------
+     文章の正本は本体の data.drafts。プロットの出来事は draftId で参照するだけで、文章を二重に持たない（detail は元の文章として保全し、下書きとは連動しない）。 */
+  function draftState(n){
+    if(!n.draftId) return { kind:'none' };
+    const d = dmap.get(n.draftId);
+    if(!d) return { kind:'missing' };
+    if(d.deleted) return { kind:'trash', draft:d };
+    return { kind:'ok', draft:d };
+  }
+  const evName = n => (n.title || '').trim() || '未定';
+  function usersOf(did, exceptId){ const out = []; pvForEach(model.items, x => { if(x.kind === 'event' && x.draftId === did && x.id !== exceptId) out.push(x); }); return out; }
+  function linkedCount(n){ let d = 0, im = 0; const w = x => { if(x.kind === 'group') x.children.forEach(w); else { if(x.draftId) d++; im += x.images.length; } }; w(n); return { d, im }; }
+  const PREVIEW_MAX = 600; // プレビュー表示だけの上限（保存文章は切り詰めない）
+  function writeBlockHtml(n){
+    const ds = draftState(n), hasDetail = !!(n.detail || '').trim();
+    const bkBtn = hasDetail && ds.kind !== 'none' ? `<button type="button" class="lnk sm" data-act="toggleBackup" data-id="${n.id}" aria-expanded="${bk.has(n.id)}">${bk.has(n.id) ? '退避した元の文章を閉じる' : '退避した元の文章を見る'}</button>` : '';
+    const bkBox = bkBtn && bk.has(n.id) ? `<div class="wbk"><div class="wmeta">プロットに書かれていた元の文章（退避です。下書きとは連動しません）</div><div class="dtext">${esc(n.detail)}</div></div>` : '';
+    if(ds.kind === 'missing') return `<div class="wblock"><div class="wissue">⚠ 関連づけた下書きが見つかりません（削除された可能性があります）。空の下書きへは置き換えていません。
+      <div class="wacts"><button type="button" class="lnk sm" data-act="pickDraft" data-id="${n.id}">下書きを選び直す</button><button type="button" class="lnk sm" data-act="unlinkAsk" data-id="${n.id}">関連を解除</button>${bkBtn}</div></div>${bkBox}</div>`;
+    if(ds.kind === 'trash') return `<div class="wblock"><div class="wissue">⚠ 関連づけた下書き「${esc(ds.draft.title)}」はゴミ箱にあります。
+      <div class="wacts"><button type="button" class="lnk sm" data-act="restoreDraft" data-id="${n.id}">ゴミ箱から復元して使う</button><button type="button" class="lnk sm" data-act="pickDraft" data-id="${n.id}">別の下書きを選ぶ</button><button type="button" class="lnk sm" data-act="unlinkAsk" data-id="${n.id}">関連を解除</button>${bkBtn}</div></div>${bkBox}</div>`;
+    const text = ds.kind === 'ok' ? ds.draft.body : (n.detail || '');
+    const shown = text.length > PREVIEW_MAX ? text.slice(0, PREVIEW_MAX) + '…' : text;
+    let meta = '';
+    if(ds.kind === 'ok'){
+      const others = usersOf(n.draftId, n.id);
+      meta = `<div class="wmeta">下書き「${esc(ds.draft.title)}」${others.length ? `・同じ文章を「${esc(others.map(evName).join('」「'))}」でも使っています（共有）` : ''}</div>`;
+    } else if(text.trim()){
+      meta = `<div class="wmeta">プロットに書かれた文章（まだ下書きにつながっていません）</div>`;
+    }
+    const prev = text.trim()
+      ? `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="文章を編集する"><span class="wtxt">${esc(shown)}</span><span class="wed">✎ 編集</span></button>`
+      : `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="ここから書く"><span class="wempty">✎ ここから書く</span></button>`;
+    const acts = ds.kind === 'ok'
+      ? `<button type="button" class="lnk sm" data-act="pickDraft" data-id="${n.id}">下書きを変える</button><button type="button" class="lnk sm" data-act="unlinkAsk" data-id="${n.id}">関連を解除</button>${bkBtn}`
+      : `<button type="button" class="lnk sm" data-act="pickDraft" data-id="${n.id}">既存の下書きを選ぶ</button>`;
+    return `<div class="wblock">${meta}${prev}<div class="wacts">${acts}</div>${bkBox}</div>`;
+  }
+  function refImgsHtml(n){
+    const thumbs = n.images.map(im => `<div class="rimgw"><button type="button" class="rimgb" data-act="viewImg" data-id="${n.id}" data-img="${esc(im.id)}" aria-label="参考画像を拡大${im.memo ? '：' + esc(im.memo) : ''}"><span class="rimgph">…</span></button>${im.memo ? `<span class="rimgm">${esc(im.memo)}</span>` : ''}</div>`).join('');
+    return `<div class="rimgs">${thumbs}<button type="button" class="lnk sm" data-act="addImg" data-id="${n.id}" aria-label="参考画像を追加">＋ 参考画像</button></div>`;
+  }
+
+  /* ---------- 通し読み：ツリーを表示順にたどり、文章だけをつなげて表示する（別データとしては保存しない） ---------- */
+  function readerEvent(n){
+    const ds = draftState(n), name = esc(evName(n));
+    if(ds.kind === 'missing') return `<div class="rd-ev rd-warn" data-node="${n.id}"><div class="rd-cap">${name}</div><div class="rd-state">⚠ 関連づけた下書きが見つかりません（退避した文章へは切り替えていません）</div><div class="wacts"><button type="button" class="lnk sm" data-act="pickDraft" data-id="${n.id}">下書きを選び直す</button><button type="button" class="lnk sm" data-act="unlinkAsk" data-id="${n.id}">関連を解除</button></div></div>`;
+    if(ds.kind === 'trash') return `<div class="rd-ev rd-warn" data-node="${n.id}"><div class="rd-cap">${name}</div><div class="rd-state">⚠ 関連づけた下書き「${esc(ds.draft.title)}」はゴミ箱にあります（退避した文章へは切り替えていません）</div><div class="wacts"><button type="button" class="lnk sm" data-act="restoreDraft" data-id="${n.id}">復元して使う</button><button type="button" class="lnk sm" data-act="pickDraft" data-id="${n.id}">別の下書きを選ぶ</button></div></div>`;
+    const text = ds.kind === 'ok' ? ds.draft.body : (n.detail || '');
+    if(!text.trim()){
+      if(ui.rh) return '';
+      return `<div class="rd-ev rd-empty" data-node="${n.id}"><span>未執筆：${name}</span><button type="button" class="lnk sm" data-act="openWriter" data-id="${n.id}">書く</button></div>`;
+    }
+    const shared = ds.kind === 'ok' && usersOf(n.draftId, n.id).length ? '<span class="rd-sh">共有</span>' : '';
+    return `<div class="rd-ev" data-node="${n.id}"><div class="rd-cap"><span>${name}</span>${shared}<button type="button" class="lnk sm rd-ed" data-act="openWriter" data-id="${n.id}" aria-label="${name}の文章を編集">✎ 編集</button></div><div class="rd-text">${esc(text)}</div></div>`;
+  }
+  function readerHtml(){
+    let scopeNode = reader.scope ? find(reader.scope) : null;
+    if(reader.scope && !scopeNode) reader.scope = null;
+    const items = scopeNode ? [scopeNode.node] : model.items;
+    let body = '', total = 0, empty = 0;
+    const walk = (list, depth) => list.forEach(n => {
+      if(n.kind === 'group'){
+        const t = [n.label.trim(), n.title.trim()].filter(Boolean).join('　');
+        body += `<div class="rd-h rd-h${Math.min(depth, 3)}" data-node="${n.id}">${t ? esc(t) : '（区分未定）'}</div>`;
+        walk(n.children, depth + 1);
+      } else {
+        total++;
+        const ds = draftState(n);
+        if(ds.kind === 'none' ? !(n.detail || '').trim() : ds.kind === 'ok' && !ds.draft.body.trim()) empty++;
+        body += readerEvent(n);
+      }
+    });
+    walk(items, 0);
+    const scopeName = scopeNode ? `「${esc(plain(scopeNode.node))}」の中だけ` : '作品全体';
+    return `<div class="rd-bar"><button type="button" class="btn" data-act="exitRead">← プロットへ戻る</button><div class="rd-title">通し読み</div></div>
+      <div class="rd-scope"><span>${scopeName}・出来事${total}件・未執筆${empty}件</span><button type="button" class="lnk sm" data-act="toggleHide" aria-pressed="${!!ui.rh}">${ui.rh ? '✓ ' : ''}未執筆を隠す</button></div>
+      <div id="view" class="reader">${body || '<div class="emptyall">読む文章がありません。</div>'}</div>`;
+  }
+  function enterRead(scope){
+    if(composing){ toast('文字の変換を確定してから「通し読み」を押してください'); return; }
+    const ae = root.activeElement; if(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) ae.blur();
+    commit();
+    readBack = captureViewState();
+    mode = 'read'; reader = { scope:scope || null }; mv = { sel:null, col:{} };
+    render(); window.scrollTo(0, 0);
+  }
+  function exitRead(){
+    mode = 'normal'; render();
+    if(readBack) restoreViewState(readBack);
+    readBack = null;
+  }
+
+  /* ---------- 執筆モーダルを開く・キャラ資料を開く（本体側のReact画面へ依頼する） ---------- */
+  function captureViewState(){ return { scrollY:window.scrollY, anchor:captureAnchor(), reader: mode === 'read' ? { scope:reader.scope } : null }; }
+  function restoreViewState(vs){
+    if(!vs) return;
+    if(vs.anchor) restoreAnchor(vs.anchor);
+    else if(typeof vs.scrollY === 'number') window.scrollTo(0, vs.scrollY);
+  }
+  function launchWriter(id, did){
+    lastLaunchVS = captureViewState();
+    api.openWriter({ eventId:id, draftId:did, origin: mode === 'read' ? 'reader' : 'plot', viewState:lastLaunchVS });
+  }
+  // 新しい下書きを作って出来事へ関連付け、書き始める。プロットの更新と下書きの追加は1回のデータ更新で行う。detail は変更しない（退避として残る）。
+  function beginDraft(id, copyDetail){
+    const i = find(id); if(!i) return;
+    const n = i.node;
+    const entry = makeDraftEntry((n.title || '').trim() || '無題の下書き', copyDetail ? n.detail : '', null, null);
+    n.draftId = entry.id;
+    dmap.set(entry.id, entry);
+    commitWithDraft(entry);
+    render();
+    launchWriter(id, entry.id);
+  }
+  function openWriter(id){
+    if(mode === 'move') return; // 移動モードでは文章の編集を開かない
+    if(composing){ toast('文字の変換を確定してから開いてください'); return; }
+    const ae = root.activeElement; if(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) ae.blur();
+    commit(); // 資料・モーダルを開く前に、入力中の変更を本体へ反映する
+    const i = find(id); if(!i) return;
+    const n = i.node, ds = draftState(n);
+    if(ds.kind === 'ok'){ launchWriter(id, ds.draft.id); return; }
+    if(ds.kind === 'none'){
+      if((n.detail || '').trim()){
+        askDlg('この文章を下書きへコピーして編集する',
+          `<p>プロットに書かれている文章を、新しい下書きへそのままコピー（改行も含む）して、下書きのほうを編集します。</p><p class="hint">元の文章はプロットに退避として残り、あとから確認できます。「やめる」では何も変わりません。</p>`,
+          'コピーして編集する', () => { closeModal(); beginDraft(id, true); });
+      } else beginDraft(id, false);
+      return;
+    }
+    issueDlg(id);
+  }
+  function openChar(cid){
+    if(mode === 'move') return;
+    if(composing){ toast('文字の変換を確定してから開いてください'); return; }
+    const ae = root.activeElement; if(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) ae.blur();
+    commit();
+    api.openChar({ charId:cid, viewState:captureViewState() });
+  }
+  function issueDlg(id){
+    const i = find(id); if(!i) return;
+    const ds = draftState(i.node);
+    openModal(`<h2>関連づけた下書きを確認してください</h2><div class="where warn">${ds.kind === 'trash' ? `下書き「${esc(ds.draft.title)}」はゴミ箱にあります。` : '関連づけた下書きが見つかりません。'}</div>
+      <div class="hint">空の下書きへは自動で置き換えません。次のどれかを選んでください。</div>
+      <div class="ops">${ds.kind === 'trash' ? `<button class="btn" data-act="restoreDraft" data-id="${id}">ゴミ箱から復元して使う</button>` : ''}<button class="btn" data-act="pickDraft" data-id="${id}">別の下書きを選ぶ</button><button class="btn danger" data-act="unlinkAsk" data-id="${id}">関連を解除</button></div>
+      <div class="foot"><button class="btn" data-act="close">閉じる</button></div>`);
+  }
+  function pickDraftDlg(id){
+    const i = find(id); if(!i) return;
+    const n = i.node;
+    const live = [...dmap.values()].filter(d => !d.deleted).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    const users = new Map();
+    pvForEach(model.items, x => { if(x.kind === 'event' && x.draftId){ if(!users.has(x.draftId)) users.set(x.draftId, []); users.get(x.draftId).push(evName(x)); } });
+    const rows = live.map(d => { const u = users.get(d.id) || [], cur = n.draftId === d.id;
+      return `<button type="button" class="pick${cur ? ' on' : ''}" data-act="pickDraftSel" data-id="${id}" data-did="${esc(d.id)}"><span class="pname"><b>${esc(d.title)}</b><span class="hint" style="display:block">${d.body.length.toLocaleString()}文字${u.length ? '・出来事：' + esc(u.join('、')) : ''}</span></span><span class="ck">${cur ? '✓ 選択中' : ''}</span></button>`; }).join('');
+    openModal(`<h2>下書きを選ぶ</h2><div class="where">出来事：「${esc(evName(n))}」</div>
+      <div class="hint">選んだ下書きを、この出来事の文章として使います。下書きの中身は変わらず、プロットに書かれた元の文章も上書きしません。</div>
+      ${rows || '<div class="hint">下書きがまだありません。「ここから書く」から新しく作れます。</div>'}
+      <div class="foot"><button class="btn" data-act="close">キャンセル</button></div>`);
+  }
+  function imgViewDlg(id, imgId){
+    const i = find(id); if(!i) return;
+    const im = i.node.images.find(x => x.id === imgId); if(!im) return;
+    openModal(`<h2>参考画像</h2><div class="where">出来事：「${esc(evName(i.node))}」</div>
+      <div class="lbox" data-img="${esc(imgId)}"><span class="rimgph">読み込み中…</span></div>
+      <div class="field"><label>メモ（任意・短く）</label><input type="text" maxlength="40" value="${esc(im.memo)}" data-sf="imgMemo" data-id="${id}" data-img="${esc(imgId)}" placeholder="例：衣装の参考" autocomplete="off"></div>
+      <div class="hint">「関連を解除」は、この出来事から外すだけです。画像データは削除しません。</div>
+      <div class="foot"><button class="btn danger" data-act="imgUnlinkAsk" data-id="${id}" data-img="${esc(imgId)}">関連を解除</button><button class="btn primary" data-act="close">閉じる</button></div>`);
+  }
+  // 参考画像の追加：圧縮・保存（既存の処理を再利用）が成功してから、出来事へ関連付ける
+  root.getElementById('refFile').addEventListener('change', async (e) => {
+    const f = e.target.files && e.target.files[0], id = pendingImgEvent;
+    e.target.value = ''; pendingImgEvent = null;
+    if(!f || !id) return;
+    toast('画像を保存しています…');
+    try{
+      const dataUrl = await compressImageFile(f);
+      const imgId = uid('img');
+      await imageStorage.save(imgId, dataUrl);
+      imgCache.set(imgId, dataUrl);
+      if(destroyed || !model) return;
+      const i = find(id);
+      if(!i){ toast('出来事が見つからないため、関連付けませんでした'); return; }
+      i.node.images.push({ id:imgId, memo:'' });
+      changed(); render(); toast('参考画像を追加しました');
+    }catch(err){
+      console.error('参考画像の保存に失敗しました', err);
+      toast('画像を保存できませんでした。別の画像でお試しください');
+    }
+  });
+
   function strBar(g){
     const sts = model.structures.filter(s => s.groupId === g.id);
     const flat = pvGroupFlat(model.items, g.id);
@@ -10874,7 +11221,7 @@ function createPlotV2View(host, api){
   function renderGroup(n, depth){
     const cnt = n.children.length, col = !!ui.col[n.id], showSt = !!ui.st[n.id];
     let h = `<div class="card group ${depth % 2 ? 'odd' : 'even'}${depth >= 2 ? ' deep2' : ''}${depth >= 4 ? ' deep4' : ''}" data-node="${n.id}"><div class="ghead" data-row="${n.id}">
-      <div class="grow1">${depth >= 3 ? `<span class="lvl" title="${depth + 1}階層目">${depth + 1}階層</span>` : ''}${fT(n.id,'label',n.label,'区分名','lb')}${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}<button type="button" class="lnk gact" data-act="toggleStruct" data-id="${n.id}" aria-pressed="${showSt}">${showSt?'✓ ':''}構成</button></div>
+      <div class="grow1">${depth >= 3 ? `<span class="lvl" title="${depth + 1}階層目">${depth + 1}階層</span>` : ''}${fT(n.id,'label',n.label,'区分名','lb')}${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}<span class="gacts"><button type="button" class="lnk" data-act="readGroup" data-id="${n.id}" aria-label="このまとまりだけを通し読み">通し読み</button><button type="button" class="lnk" data-act="toggleStruct" data-id="${n.id}" aria-pressed="${showSt}">${showSt?'✓ ':''}構成</button></span></div>
       ${fT(n.id,'title',n.title,'タイトルを入力','t')}${fA(n.id,'summary',n.summary,'概要を追加','s')}
       <div class="tgrow"><button type="button" class="lnk tgl" data-act="toggle" data-id="${n.id}" aria-expanded="${!col}"><span class="tri" aria-hidden="true">${col?'▶':'▼'}</span>${col?'中身を開く':'中身を閉じる'}</button></div></div>`;
     if(!col) h += `<div class="gbody">${showSt ? strBar(n) : ''}${renderList(n.children, n.id, depth + 1)}</div>`;
@@ -10959,6 +11306,14 @@ function createPlotV2View(host, api){
   function render(){
     const y = window.scrollY;
     if(errState){ pv.className = 'pv v-card'; wrap.innerHTML = errHtml(); return; }
+    if(mode === 'read'){
+      pv.className = 'pv v-' + ui.view + ' mode-read';
+      syncTop();
+      wrap.innerHTML = readerHtml();
+      paintIcons();
+      window.scrollTo(0, y);
+      return;
+    }
     const move = mode === 'move';
     if(mv.sel && !find(mv.sel)) mv.sel = null;
     pv.className = 'pv v-' + ui.view + (move ? ' mode-move' : '');
@@ -10973,6 +11328,7 @@ function createPlotV2View(host, api){
           <button type="button" data-act="setView" data-view="card" aria-pressed="${ui.view==='card'}">カード</button>
           <button type="button" data-act="setView" data-view="line" aria-pressed="${ui.view==='line'}">ライン</button>
         </div>
+        <button class="btn tb-read" data-act="readAll" aria-label="プロットの順に作品全体を通し読み">📖 通し読み</button>
         <button class="btn" data-act="expandAll">すべて開く</button>
         <button class="btn" data-act="collapseAll">すべて閉じる</button>
         <button class="lnk tbsp" data-act="enterMove" aria-label="移動モードに入る">⇄ 移動</button>
@@ -11075,6 +11431,7 @@ function createPlotV2View(host, api){
     const n = find(id).node, c = pvCountAll(n);
     openModal(`<h2>削除の確認</h2><p>「${esc(plain(n))}」を削除します。</p>
       ${n.kind==='group'?`<p><b>まとまりを削除すると、${c?`中の項目${c}件もすべて削除されます。`:'中の項目も削除されます（現在は空です）。'}</b></p>`:''}
+      ${(lk => (lk.d || lk.im) ? `<p class="hint">関連づけた下書き${lk.d}件とその履歴は削除されません（下書き一覧に残ります）。参考画像${lk.im}枚は関連付けだけが消え、画像データ本体は削除されません。</p>` : '')(linkedCount(n))}
       <div class="foot"><button class="btn" data-act="close">やめる</button><button class="btn danger" data-act="delOk" data-id="${id}">削除する</button></div>`);
   }
   function mvDestDlg(id){
@@ -11218,6 +11575,41 @@ function createPlotV2View(host, api){
         const sc = mroot.querySelector('.modal').scrollTop; pickDlg(id, t.dataset.type); mroot.querySelector('.modal').scrollTop = sc; break;
       }
       case 'askOk': { const f = pendingOk; pendingOk = null; if(f) f(); break; }
+      /* 文章（下書き）・参考画像・通し読み */
+      case 'openWriter': openWriter(id); break;
+      case 'pickDraft': pickDraftDlg(id); break;
+      case 'pickDraftSel': {
+        const i = find(id), did = t.dataset.did; if(!i) break;
+        if(i.node.draftId === did){ closeModal(); render(); break; }
+        const others = usersOf(did, id);
+        const doLink = () => { const j = find(id); if(!j) return; j.node.draftId = did; changed(); closeModal(); render(); toast('下書きを関連付けました（プロットの元の文章はそのまま残っています）'); };
+        if(others.length) askDlg('同じ文章を共有して編集します', `<p>この下書きは「${esc(others.map(evName).join('」「'))}」にも関連付けられています。</p><p><b>同じ文章を共有して編集します。</b>どちらの出来事から編集しても、同じ下書きが変わります。</p>`, '共有して関連付ける', doLink);
+        else doLink();
+        break;
+      }
+      case 'unlinkAsk': {
+        const i = find(id); if(!i) break;
+        askDlg('下書きとの関連付けを解除', `<p>「${esc(evName(i.node))}」と下書きの関連付けだけを解除します。</p><p><b>下書きとその履歴は削除されません</b>（下書き一覧に残ります）。プロットの元の文章もそのままです。</p>`, '解除する', () => {
+          const j = find(id); if(j){ j.node.draftId = ''; changed(); } closeModal(); render();
+        }, true);
+        break;
+      }
+      case 'restoreDraft': { const i = find(id); if(i && i.node.draftId){ api.restoreDraft(i.node.draftId); } closeModal(); render(); toast('ゴミ箱から復元しました'); break; }
+      case 'toggleBackup': if(bk.has(id)) bk.delete(id); else bk.add(id); render(); break;
+      case 'addImg': pendingImgEvent = id; { const fi = root.getElementById('refFile'); fi.value = ''; fi.click(); } break;
+      case 'viewImg': imgViewDlg(id, t.dataset.img); break;
+      case 'imgUnlinkAsk': {
+        const imgId = t.dataset.img;
+        askDlg('参考画像の関連付けを解除', `<p>この出来事から参考画像を外します。<b>画像データ本体は削除されません。</b></p>`, '外す', () => {
+          const j = find(id); if(j){ j.node.images = j.node.images.filter(x => x.id !== imgId); changed(); } closeModal(); render();
+        }, true);
+        break;
+      }
+      case 'openChar': openChar(t.dataset.cid); break;
+      case 'readAll': enterRead(null); break;
+      case 'readGroup': enterRead(id); break;
+      case 'exitRead': exitRead(); break;
+      case 'toggleHide': ui.rh = !ui.rh; saveUi(); render(); break;
       /* 構成 */
       case 'structDlg': structDlg(id, t.dataset.sid || null); break;
       case 'structClose': closeModal(); render(); break;
@@ -11280,7 +11672,8 @@ function createPlotV2View(host, api){
   }
   function applyStructField(t){
     const sf = t.dataset && t.dataset.sf; if(!sf || !model) return false;
-    if(sf === 'type'){ const s = model.structures.find(x => x.id === t.dataset.sid); if(s){ s.type = t.value; touch(); } }
+    if(sf === 'imgMemo'){ const i = find(t.dataset.id); const im = i && i.node.images && i.node.images.find(x => x.id === t.dataset.img); if(im){ im.memo = t.value; touch(); } }
+    else if(sf === 'type'){ const s = model.structures.find(x => x.id === t.dataset.sid); if(s){ s.type = t.value; touch(); } }
     else { const f = findRole(t.dataset.role); if(f){ if(sf === 'roleName') f.r.name = t.value; else if(sf === 'roleColor') f.r.color = t.value; touch(); } }
     return true;
   }
@@ -11309,22 +11702,42 @@ function createPlotV2View(host, api){
 
   /* ---------- 外から呼ぶ口 ---------- */
   return {
-    sync(plot, err, chars, places){
+    sync(plot, err, chars, places, drafts){
       const prevSig = JSON.stringify(ctx);
       ctx = {
         chars: (chars||[]).map(c => ({ id:c.id, name:c.name || '（名前なし）', imageId:c.iconImageId || c.image || null })),
         places: (places||[]).map(p => ({ id:p.id, name:p.name || '（名前なし）', icon:'📍' })),
       };
+      // 下書きは参照だけ（文章はここで保存しない）。変更の検出は本文全体を比べず、更新日時・長さ・見出し・削除状態で行う。
+      const list = drafts || [];
+      const nsig = list.map(d => d.id + '|' + (d.deleted ? 1 : 0) + '|' + d.updatedAt + '|' + (d.body || '').length + '|' + d.title).join('\n');
+      const draftsChanged = nsig !== dsig;
+      dsig = nsig; dmap = new Map(list.map(d => [d.id, d]));
       if(err){ errState = err; model = null; lastCommitted = null; dirty = false; clearTimeout(timer); closeModal(); render(); return; }
       errState = null;
+      // 取り込み済み・自分が渡したデータの古い参照が遅れて届いても、外部変更とは扱わない（関連付けや入力が巻き戻らないように）
       if(!model || (plot !== lastCommitted && !mine.has(plot))){
         clearTimeout(timer); dirty = false;
-        model = clone(plot); lastCommitted = plot;
+        model = clone(plot); lastCommitted = plot; mine.add(plot);
         mode = 'normal'; mv = { sel:null, col:{} }; mroot.innerHTML = ''; modalY = null;
         render();
-      } else if(model && prevSig !== JSON.stringify(ctx) && !composing && !(root.activeElement && /^(INPUT|TEXTAREA)$/.test(root.activeElement.tagName))){
-        render(); // キャラ名・アイコンの変更を反映（入力中は触らない）
+      } else if(model && (prevSig !== JSON.stringify(ctx) || draftsChanged) && !composing && !writerOpen && !(root.activeElement && /^(INPUT|TEXTAREA)$/.test(root.activeElement.tagName))){
+        render(); // キャラ名・アイコン・下書きの文章や見出しの変更を反映（入力中・執筆モーダルを開いている間は触らない）
       }
+    },
+    // 執筆モーダルの開閉。開いている間は再描画を止め、閉じたら最新の文章で描き直して読んでいた位置へ戻る
+    setWriterOpen(v){
+      if(writerOpen === v) return;
+      writerOpen = v;
+      if(!v && model && !errState && !destroyed){ render(); restoreViewState(lastLaunchVS); }
+    },
+    // キャラ資料などから戻ってきた時：プロット（または通し読み）の元の位置・状態へ戻す。開閉状態は端末内のUI設定から復元済み
+    restoreState(vs){
+      if(!vs || !model || errState) return;
+      lastLaunchVS = vs;
+      if(vs.reader){ mode = 'read'; reader = { scope: vs.reader.scope && find(vs.reader.scope) ? vs.reader.scope : null }; readBack = null; }
+      render(); restoreViewState(vs);
+      requestAnimationFrame(() => { if(!destroyed) restoreViewState(vs); });
     },
     destroy(){
       destroyed = true;
@@ -11337,22 +11750,381 @@ function createPlotV2View(host, api){
   };
 }
 
-function PlotV2({ data, setData, markDirty }){
+/* ============ プロット内の執筆モーダル ============
+   ・文章の正本は data.drafts。ここでは関連する下書き1件の全文だけを編集する（出来事側に文章は持たない）。
+   ・本文の更新・履歴は draftApplyBody などの共通処理を使い、対象の下書き1件だけを書き換える（古い画面内データで下書き全体を上書きしない）。
+   ・道具・辞書・シーン進行は執筆画面と同じ部品を使い、挿入先はこのモーダルで編集中の下書き（writer.draftId）に限る。 */
+function useVisualViewportBox(){
+  const read = () => { const vv = window.visualViewport; return vv ? { top:Math.round(vv.offsetTop), height:Math.round(vv.height) } : { top:0, height:window.innerHeight }; };
+  const [box, setBox] = useState(read);
+  useEffect(()=>{
+    const vv = window.visualViewport;
+    const update = () => setBox(read());
+    update();
+    window.addEventListener('resize', update);
+    if(vv){ vv.addEventListener('resize', update); vv.addEventListener('scroll', update); }
+    return () => { window.removeEventListener('resize', update); if(vv){ vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); } };
+  }, []);
+  return box;
+}
+
+// 参考画像のサムネイル。縦横比を保って全体を表示する（切り抜かない）。未取得・読み込み失敗は代替表示で、文章の編集は妨げない。
+function PlotImageThumb({ imageId, memo, onOpen }){
+  const [url, setUrl] = useState(undefined);
+  useEffect(()=>{
+    let alive = true; setUrl(undefined);
+    imageStorage.get(imageId).then(u=>{ if(alive) setUrl(u || null); }).catch(err=>{ console.error('画像の読み込みに失敗しました', err); if(alive) setUrl(null); });
+    return ()=>{ alive = false; };
+  }, [imageId]);
+  return (
+    <div className="pw-thumbw">
+      <button type="button" className="pw-thumb" onMouseDown={e=>e.preventDefault()} onPointerDown={e=>e.preventDefault()}
+        onClick={()=>{ if(url) onOpen(url, memo); }} aria-label={'参考画像を拡大'+(memo?'：'+memo:'')}>
+        {url ? <img src={url} alt={memo||'参考画像'} onError={()=>setUrl(null)} /> : <span className="pw-ph">{url===undefined ? '…' : '画像を読み込めません'}</span>}
+      </button>
+      {memo ? <span className="pw-cap">{memo}</span> : null}
+    </div>
+  );
+}
+
+function PlotDraftWriter({ data, setData, writer, onClose, onOpenChar, saveState, onSaveNow, backRef,
+  writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary,
+  lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds,
+  adultDictionary, setAdultDictionary, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow }){
+  const draftId = writer.draftId;
+  const draft = (data.drafts||[]).find(d=>d.id===draftId && !d.deleted) || null;
+  const evInfo = useMemo(()=>pvFind(data.plotV2.items, writer.eventId), [data.plotV2, writer.eventId]);
+  const ev = evInfo ? evInfo.node : null;
+  const evTitle = ev ? ((ev.title||'').trim() || '未定') : '（出来事が見つかりません）';
+  const body = draft ? draft.body : '';
+  const bodyRef = useRef(body); bodyRef.current = body;
+  const textareaRef = useRef(null);
+  const savedSelectionRef = useRef({ start:0, end:0 });
+  const hasCursorInfoRef = useRef(false);
+  const savedScrollRef = useRef(0);
+  const editDirtyRef = useRef(false);
+  const sheetOpenRef = useRef(false);
+  const keyboardInset = useKeyboardInset();
+  const vvBox = useVisualViewportBox();
+  const [fontSize] = useState(loadWritingFontSize);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsMode, setToolsMode] = useState('fav');
+  const [toolsCatId, setToolsCatId] = useState(null);
+  const [exprDictOpen, setExprDictOpen] = useState(false);
+  const [exprDictEditorOpen, setExprDictEditorOpen] = useState(false);
+  const [specialDictEditorOpen, setSpecialDictEditorOpen] = useState(false);
+  const [mediaDictEditorOpen, setMediaDictEditorOpen] = useState(false);
+  const [dictEditorOpen, setDictEditorOpen] = useState(false);
+  const [dictTab, setDictTabState] = useState(()=>{ try{ const v=localStorage.getItem(WRITING_LAST_DICT_TAB_KEY); if(WRITING_DICT_TABS.includes(v)) return v; }catch(e){} return 'expression'; });
+  const setDictTab = (t) => { if(!WRITING_DICT_TABS.includes(t)) return; setDictTabState(t); try{ localStorage.setItem(WRITING_LAST_DICT_TAB_KEY, t); }catch(e){} };
+  const [adultEdit, setAdultEdit] = useState(null);
+  const [flowOpen, setFlowOpen] = useState(false);
+  const [flowEditing, setFlowEditing] = useState(false);
+  const [flowActiveId, setFlowActiveId] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [sideOpen, setSideOpen] = useState(false);
+  const [lb, setLb] = useState(null);
+  sheetOpenRef.current = exprDictOpen || flowOpen;
+
+  // 背景（プロット）をスクロールさせない
+  useEffect(()=>{
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return ()=>{ document.body.style.overflow = prev; };
+  }, []);
+  // キャラ資料から戻ってきた時：カーソル位置・スクロール位置を戻す（フォーカスは奪わない）
+  useEffect(()=>{
+    const el = textareaRef.current, sel = writer.sel;
+    if(!el || !sel) return;
+    try{ el.setSelectionRange(sel.start, sel.end); }catch(e){}
+    el.scrollTop = sel.scrollTop || 0;
+    savedSelectionRef.current = { start:sel.start, end:sel.end }; hasCursorInfoRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // 下書きを開いている間は20秒おきに、変更があれば直前版として記録する（直近5世代。入力ごとには記録しない）
+  useEffect(()=>{
+    const timer = setInterval(()=>{ setData(d=>draftSnapshotIfChanged(d, draftId)); }, 20000);
+    return ()=>clearInterval(timer);
+  }, [draftId]);
+
+  // ---- カーソル位置を保ったままの挿入（執筆画面と同じ考え方。挿入先は常にこのモーダルの下書き） ----
+  const rememberEditorState = () => {
+    const el = textareaRef.current;
+    if(el && typeof el.selectionStart === 'number'){
+      savedSelectionRef.current = { start:el.selectionStart, end:el.selectionEnd };
+      hasCursorInfoRef.current = true;
+    }
+    if(el) savedScrollRef.current = el.scrollTop;
+  };
+  const preventFocusSteal = (e) => { e.preventDefault(); rememberEditorState(); };
+  const getSelection = (len) => {
+    if(!hasCursorInfoRef.current) return { start:len, end:len };
+    let { start, end } = savedSelectionRef.current;
+    start = Math.max(0, Math.min(start ?? len, len));
+    end = Math.max(0, Math.min(end ?? start, len));
+    if(end < start){ const t = start; start = end; end = t; }
+    return { start, end };
+  };
+  const restoreFocusAndSelection = (pos, endPos) => {
+    const top = savedScrollRef.current;
+    requestAnimationFrame(()=>{
+      const el = textareaRef.current; if(!el) return;
+      if(!sheetOpenRef.current){ try{ el.focus({ preventScroll:true }); }catch(e){ el.focus(); } }
+      try{ el.setSelectionRange(pos, endPos===undefined ? pos : endPos); }catch(e){}
+      el.scrollTop = top;
+    });
+  };
+  const insertIntoBody = (text) => {
+    if(!text || !draft) return;
+    const cur = bodyRef.current;
+    const { start, end } = getSelection(cur.length);
+    const next = cur.slice(0, start) + text + cur.slice(end);
+    const pos = start + text.length;
+    setData(d=>draftApplyBody(d, draftId, next));
+    bodyRef.current = next;
+    savedSelectionRef.current = { start:pos, end:pos };
+    restoreFocusAndSelection(pos, pos);
+  };
+  const insertSceneFlowText = (text) => {
+    if(!draft) return;
+    setData(d=>draftPushHistory(d, draftId, bodyRef.current)); // 挿入前に現在の内容を履歴へ退避
+    const cur = bodyRef.current;
+    const { start } = getSelection(cur.length);
+    const before = cur.slice(0, start), after = cur.slice(start);
+    const lead = before.length===0 ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+    const trail = after.length===0 ? '' : after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n';
+    insertIntoBody(lead + text + trail);
+  };
+
+  // ---- シート類の開閉（道具・辞書・シーン進行は同時に開かない） ----
+  const confirmLeaveEdit = () => {
+    if(editDirtyRef.current && !window.confirm('編集中の入力は、保存していないと失われる場合があります。閉じますか？')) return false;
+    editDirtyRef.current = false; return true;
+  };
+  const restoreSavedSelection = () => restoreFocusAndSelection(savedSelectionRef.current.start, savedSelectionRef.current.end);
+  const toggleTools = () => { setToolsOpen(o=>{ const n=!o; if(n){ setExprDictOpen(false); setFlowOpen(false); } return n; }); };
+  const openDictModal = () => { setToolsOpen(false); setFlowOpen(false); setFlowEditing(false); setAdultEdit(null); setExprDictOpen(true); };
+  const openFlowModal = () => { setToolsOpen(false); setExprDictOpen(false); setAdultEdit(null); setFlowEditing(false); setFlowOpen(true); };
+  const closeExprDict = () => { if(adultEdit && !confirmLeaveEdit()) return; setAdultEdit(null); setExprDictOpen(false); restoreSavedSelection(); };
+  const leaveAdultEdit = () => { if(!confirmLeaveEdit()) return; setAdultEdit(null); };
+  const closeFlow = () => { if(flowEditing && !confirmLeaveEdit()) return; setFlowEditing(false); setFlowOpen(false); restoreSavedSelection(); };
+  const leaveFlowEdit = () => { if(!confirmLeaveEdit()) return; setFlowEditing(false); };
+  const openEd = (setter) => () => { rememberEditorState(); setter(true); };
+  const closeEd = (setter) => () => { setter(false); restoreFocusAndSelection(savedSelectionRef.current.start); };
+  const dictViewHidden = exprDictEditorOpen || specialDictEditorOpen || mediaDictEditorOpen;
+
+  // ---- 閉じる：最新の編集（履歴の1世代を含む）を反映し、端末内保存を試みてから戻る ----
+  const captureSel = () => {
+    const el = textareaRef.current;
+    return el ? { start:el.selectionStart, end:el.selectionEnd, scrollTop:el.scrollTop } : null;
+  };
+  const requestClose = () => {
+    setData(d=>draftSnapshotIfChanged(d, draftId));
+    const ok = onSaveNow();
+    if(!ok && !window.confirm('端末内への保存に失敗しています。このまま閉じると、文章はアプリ内には残りますが、ページを閉じると失われる可能性があります。閉じますか？')) return;
+    onClose();
+  };
+  const handleBack = () => {
+    if(lb){ setLb(null); return true; }
+    if(historyOpen){ setHistoryOpen(false); return true; }
+    if(dictEditorOpen){ closeEd(setDictEditorOpen)(); return true; }
+    if(exprDictEditorOpen){ closeEd(setExprDictEditorOpen)(); return true; }
+    if(specialDictEditorOpen){ closeEd(setSpecialDictEditorOpen)(); return true; }
+    if(mediaDictEditorOpen){ closeEd(setMediaDictEditorOpen)(); return true; }
+    if(adultEdit){ leaveAdultEdit(); return true; }
+    if(flowEditing){ leaveFlowEdit(); return true; }
+    if(flowOpen){ closeFlow(); return true; }
+    if(exprDictOpen){ closeExprDict(); return true; }
+    if(toolsOpen){ setToolsOpen(false); return true; }
+    requestClose(); return true;
+  };
+  useEffect(()=>{
+    if(backRef) backRef.current = handleBack;
+    return ()=>{ if(backRef && backRef.current===handleBack) backRef.current = null; };
+  });
+  const openChar = (cid) => { rememberEditorState(); onOpenChar(cid, captureSel()); };
+
+  // ---- 道具（記号・お気に入り／表現パレット） ----
+  const pinnedSnippets = writingSnippets.snippets.filter(s=>s.pinned).sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0));
+  const favLabelOf = (sn) => { const t = sn.text||''; if(t && t.length<=6) return t; return sn.label ? sn.label : t; };
+  const toolsBtnProps = { onMouseDown:preventFocusSteal, onPointerDown:preventFocusSteal };
+  const toolsSnippetCats = [...writingSnippets.categories].sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0)).filter(cat=>writingSnippets.snippets.some(sn=>sn.categoryId===cat.id));
+  const toolsActiveCat = toolsSnippetCats.find(c=>c.id===toolsCatId) || toolsSnippetCats[0] || null;
+  const toolsCatSnippets = toolsActiveCat ? writingSnippets.snippets.filter(sn=>sn.categoryId===toolsActiveCat.id).sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0)) : [];
+  const toolsBlock = toolsOpen ? (
+    <div className="snippet-palette writing-tools-drawer" style={{ position:'absolute', bottom:0 }}>
+      <div className="snippet-palette-head writing-tools-head">
+        <div className="wt-seg" role="tablist" aria-label="道具の切替">
+          <button type="button" role="tab" aria-selected={toolsMode==='fav'} className={"wt-seg-btn"+(toolsMode==='fav'?" active":"")} {...toolsBtnProps} onClick={()=>setToolsMode('fav')}>お気に入り</button>
+          <button type="button" role="tab" aria-selected={toolsMode==='palette'} className={"wt-seg-btn"+(toolsMode==='palette'?" active":"")} {...toolsBtnProps} onClick={()=>setToolsMode('palette')}>表現パレット</button>
+        </div>
+        <div className="snippet-palette-head-actions">
+          <button type="button" className="btn btn-sm" {...toolsBtnProps} onClick={openEd(setDictEditorOpen)}>編集</button>
+          <button type="button" className="btn btn-sm btn-ghost" aria-label="道具を閉じる" {...toolsBtnProps} onClick={()=>setToolsOpen(false)}>×</button>
+        </div>
+      </div>
+      {toolsMode==='palette' && toolsSnippetCats.length>0 && (
+        <div className="wt-cats">
+          {toolsSnippetCats.map(cat=>(
+            <button key={cat.id} type="button" className={"snippet-cat-tab"+(toolsActiveCat && toolsActiveCat.id===cat.id ? " active" : "")} {...toolsBtnProps} onClick={()=>setToolsCatId(cat.id)}>{cat.name}</button>
+          ))}
+        </div>
+      )}
+      <div className="snippet-palette-body writing-tools-body">
+        <div className="snippet-palette-buttons">
+          {toolsMode==='fav' && PUNCTUATION_SHORTCUTS.map(it=>(<button key={it.key} type="button" className="snippet-btn writing-tools-symbol" {...toolsBtnProps} onClick={()=>insertIntoBody(it.text)}>{it.label}</button>))}
+          {toolsMode==='fav' && pinnedSnippets.map(sn=>(<button key={sn.id} type="button" className="snippet-btn" {...toolsBtnProps} onClick={()=>insertIntoBody(sn.text)}>{favLabelOf(sn)}</button>))}
+          {toolsMode==='palette' && toolsCatSnippets.map(sn=>(<button key={sn.id} type="button" className="snippet-btn" {...toolsBtnProps} onClick={()=>insertIntoBody(sn.text)}>{sn.label ? sn.label : sn.text}</button>))}
+          {toolsMode==='palette' && toolsSnippetCats.length===0 && <span className="wt-empty">表現が未登録です（編集から追加）</span>}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  // ---- 辞書・シーン進行（執筆画面と同じ部品。挿入先はこのモーダルの下書き） ----
+  const panelProps = { onClose:closeExprDict, onInsert:insertIntoBody, preventFocusSteal, dictTab, onDictTabChange:setDictTab };
+  const exprDictBlock = exprDictOpen ? (
+    <WritingSheet onClose={closeExprDict} bottomInset={keyboardInset} hidden={dictViewHidden} label="辞書">
+      <div className="wsheet-pane" style={adultEdit ? {display:'none'} : null}>
+        {dictTab==='special' ? <SpecialDictionaryPanel dictionary={specialDictionary} onOpenEditor={openEd(setSpecialDictEditorOpen)} {...panelProps} />
+        : dictTab==='media' ? <MediaDictionaryPanel dictionary={mediaDictionary} onOpenEditor={openEd(setMediaDictEditorOpen)} {...panelProps} />
+        : dictTab==='adult' ? <AdultExpressionPanel dictionary={adultDictionary||{entries:[]}} onOpenEditor={()=>{ rememberEditorState(); editDirtyRef.current=false; setAdultEdit('adult'); }} {...panelProps} />
+        : dictTab==='onomatopoeia' ? <OnomatopoeiaPanel dictionary={adultOnomatopoeia||{entries:[]}} onOpenEditor={()=>{ rememberEditorState(); editDirtyRef.current=false; setAdultEdit('onomatopoeia'); }} {...panelProps} />
+        : <ExpressionDictionaryPanel dictionary={expressionDictionary} onOpenEditor={openEd(setExprDictEditorOpen)} {...panelProps} />}
+      </div>
+      {adultEdit && (
+        <WritingSheetEditPane title={adultEdit==='adult' ? '成人向け表現を編集' : 'オノマトペを編集'} onBack={leaveAdultEdit} onClose={closeExprDict} dirtyRef={editDirtyRef}>
+          {adultEdit==='adult' ? <AdultExpressionDictionaryTab adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} /> : <AdultOnomatopoeiaTab data={adultOnomatopoeia} setData={setAdultOnomatopoeia} />}
+        </WritingSheetEditPane>
+      )}
+    </WritingSheet>
+  ) : null;
+  const flowBlock = flowOpen ? (
+    <WritingSheet onClose={closeFlow} bottomInset={keyboardInset} label="シーン進行">
+      <div className="wsheet-pane" style={flowEditing ? {display:'none'} : null}>
+        <SceneFlowReferencePanel plans={(data.sceneFlowPlans||[])} activeId={flowActiveId} onActiveChange={setFlowActiveId}
+          onOpenEditor={()=>{ rememberEditorState(); editDirtyRef.current=false; setFlowEditing(true); }} onClose={closeFlow} onInsert={insertSceneFlowText} preventFocusSteal={preventFocusSteal} />
+      </div>
+      {flowEditing && (
+        <WritingSheetEditPane title="シーン進行を編集" onBack={leaveFlowEdit} onClose={closeFlow} dirtyRef={editDirtyRef}>
+          <SceneFlowPlansEditor data={data} setData={setData} kindFilter="all" allowKindSwitch adultLibrary={adultSceneFlow}
+            onInsertToDraft={(plan)=>insertSceneFlowText(formatSceneFlowPlanForInsert(plan))} initialActiveId={flowActiveId} onActiveChange={setFlowActiveId} />
+        </WritingSheetEditPane>
+      )}
+    </WritingSheet>
+  ) : null;
+
+  const chars = ev ? (ev.chars||[]).map(id=>(data.characters||[]).find(c=>c.id===id)).filter(Boolean) : [];
+  const saveLabel = saveState==='saving' ? '保存中…' : saveState==='error' ? '⚠ 未保存' : '保存済み';
+  const originLabel = writer.origin==='reader' ? '← 通し読みへ' : '← プロットへ';
+
+  if(!draft){
+    return (
+      <div className="pw-root" style={{ top:vvBox.top, height:vvBox.height }} role="dialog" aria-modal="true" aria-label="文章を編集">
+        <div className="pw-head"><button type="button" className="btn btn-sm" onClick={onClose}>{originLabel}</button><div className="pw-title"><b>{evTitle}</b></div></div>
+        <div style={{padding:16}}>関連づけた下書きが見つかりません（ゴミ箱に移された可能性があります）。プロットの出来事から、下書きを選び直してください。</div>
+      </div>
+    );
+  }
+  return (
+    <div className="pw-root" style={{ top:vvBox.top, height:vvBox.height }} role="dialog" aria-modal="true" aria-label="文章を編集">
+      <div className="pw-head">
+        <button type="button" className="btn btn-sm" style={{whiteSpace:'nowrap'}} onMouseDown={preventFocusSteal} onClick={requestClose}>{originLabel}</button>
+        <div className="pw-title"><b>{evTitle}</b><small>下書き：{draft.title}・{body.length.toLocaleString()}文字</small></div>
+        <span className={'pw-save'+(saveState==='error'?' err':'')} role="status" aria-live="polite">{saveLabel}</span>
+        <button type="button" className="btn btn-sm pw-closex" aria-label="閉じる" onMouseDown={preventFocusSteal} onClick={requestClose}>×</button>
+      </div>
+      {saveState==='error' && <div className="pw-saveerr">端末内への保存に失敗しています。文章はこの画面に保持しています。<button type="button" className="btn btn-sm" onClick={()=>onSaveNow()}>再試行</button></div>}
+      <div className="pw-bar">
+        <button type="button" className={"btn btn-sm"+(toolsOpen?" active":"")} {...toolsBtnProps} onClick={toggleTools}>🧰 道具</button>
+        <button type="button" className={"btn btn-sm"+(exprDictOpen?" active":"")} {...toolsBtnProps} onClick={openDictModal}>📖 辞書</button>
+        <button type="button" className={"btn btn-sm"+(flowOpen?" active":"")} {...toolsBtnProps} onClick={openFlowModal}>🎬 シーン進行</button>
+        <button type="button" className="btn btn-sm" {...toolsBtnProps} onClick={()=>setHistoryOpen(true)}>🕘 履歴</button>
+        <button type="button" className={"btn btn-sm pw-sidebtn"+(sideOpen?" active":"")} aria-expanded={sideOpen} {...toolsBtnProps} onClick={()=>setSideOpen(o=>!o)}>🖼 資料{ev && ev.images.length ? `（${ev.images.length}）` : ''}</button>
+        {chars.map(c=>(
+          <button key={c.id} type="button" className="btn btn-sm pw-char" {...toolsBtnProps} onClick={()=>openChar(c.id)} aria-label={(c.name||'キャラクター')+'の設定を開く'}>
+            <IconThumb imageId={c.iconImageId||c.image} size={20} /><span>{c.name||'（無名）'}</span>
+          </button>
+        ))}
+      </div>
+      <div className="pw-body">
+        <div className="pw-main">
+          <textarea key={draftId} ref={textareaRef} className="pw-area" style={{fontSize}} value={body}
+            onChange={e=>{ const v=e.target.value; setData(d=>draftApplyBody(d, draftId, v)); rememberEditorState(); }}
+            onSelect={rememberEditorState} onClick={rememberEditorState} onKeyUp={rememberEditorState} onBlur={rememberEditorState}
+            placeholder="ここから書く…" aria-label={evTitle+'の文章'} />
+        </div>
+        <aside className={'pw-side'+(sideOpen?' open':'')} aria-label="資料">
+          {ev && (ev.summary||'').trim() && <div className="pw-sec"><div className="pw-sl">概要</div><div className="pw-st">{ev.summary}</div></div>}
+          {ev && SCENE_FIELD_LABELS.map(([k,l])=>(ev.scene[k]||'').trim() ? <div className="pw-sec" key={k}><div className="pw-sl">{l}</div><div className="pw-st">{ev.scene[k]}</div></div> : null)}
+          <div className="pw-sec"><div className="pw-sl">参考画像</div>
+            {ev && ev.images.length ? <div className="pw-imgs">{ev.images.map(im=><PlotImageThumb key={im.id} imageId={im.id} memo={im.memo} onOpen={(url,memo)=>setLb({url,memo})} />)}</div> : <div className="pw-st pw-none">参考画像はありません（プロットの出来事から追加できます）</div>}
+          </div>
+        </aside>
+      </div>
+      {toolsBlock}
+      {exprDictBlock}
+      {flowBlock}
+      {dictEditorOpen && <WritingSnippetDictionaryModal writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} onClose={closeEd(setDictEditorOpen)} />}
+      {exprDictEditorOpen && <ExpressionDictionaryEditorModal expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} onClose={closeEd(setExprDictEditorOpen)} />}
+      {specialDictEditorOpen && <SpecialDictionaryEditorModal specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} onClose={closeEd(setSpecialDictEditorOpen)} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} />}
+      {mediaDictEditorOpen && <MediaDictionaryEditorModal mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} onClose={closeEd(setMediaDictEditorOpen)} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} />}
+      {historyOpen && (
+        <Modal title={`「${draft.title}」の履歴`} onClose={()=>setHistoryOpen(false)} wide>
+          <p className="adult-tab-desc">自動保存とは別に、直前の版を最大5世代まで保存しています。選ぶと今の内容と置き換わります（今の内容も履歴に残ります）。</p>
+          {!draft.history.length && <div className="empty-hint">まだ履歴はありません。編集を続けると自動的に記録されます。</div>}
+          {draft.history.map((h,i)=>(
+            <div className="writing-block-card" key={i}>
+              <div><strong>{new Date(h.savedAt).toLocaleString('ja-JP')}</strong><p>{h.body.slice(0,100)||'（本文なし）'}</p><small>{h.body.length}文字</small></div>
+              <div className="writing-block-actions"><button className="btn btn-sm btn-primary" onClick={()=>{
+                if(!window.confirm(`下書き「${draft.title}」を、${new Date(h.savedAt).toLocaleString('ja-JP')}時点の内容に置き換えますか？\n（現在の内容は置き換え前に履歴へ保存されます）`)) return;
+                setData(d=>draftRestoreHistory(d, draftId, h)); setHistoryOpen(false);
+              }}>この版に戻す</button></div>
+            </div>
+          ))}
+          <div className="modal-actions"><button className="btn" onClick={()=>setHistoryOpen(false)}>閉じる</button></div>
+        </Modal>
+      )}
+      {lb && (
+        <div className="pw-lb" role="dialog" aria-label="参考画像" onClick={()=>setLb(null)}>
+          <img src={lb.url} alt={lb.memo||'参考画像'} />
+          {lb.memo ? <div className="pw-lbcap">{lb.memo}</div> : null}
+          <button type="button" className="btn btn-sm pw-lbclose" onClick={()=>setLb(null)}>閉じる</button>
+        </div>
+      )}
+    </div>
+  );
+}
+const SCENE_FIELD_LABELS = [['goal','目的'],['obstacle','対立・障害'],['change','場面で起きる変化'],['memo','自由メモ']];
+
+function PlotV2({ data, setData, markDirty, writerOpen, onOpenWriter, onOpenChar, restoreState, onRestored }){
   const hostRef = useRef(null), ctlRef = useRef(null);
   const apiRef = useRef({});
   apiRef.current = {
     setPlot: (obj) => setData(d => (d.plotV2Error ? d : { ...d, plotV2: obj })),
+    // 下書きの新規作成と出来事への関連付けは、1回のデータ更新で行う
+    setPlotAndDraft: (obj, entry) => setData(d => (d.plotV2Error ? d : { ...d, plotV2: obj, drafts:[...(d.drafts||[]), entry] })),
+    restoreDraft: (id) => setData(d => ({ ...d, drafts:(d.drafts||[]).map(x => x.id===id ? { ...x, deleted:false, deletedAt:null } : x) })),
     markDirty: () => { if(markDirty) markDirty(); },
+    openWriter: (req) => { if(onOpenWriter) onOpenWriter(req); },
+    openChar: (req) => { if(onOpenChar) onOpenChar(req); },
   };
   useEffect(()=>{
-    const ctl = createPlotV2View(hostRef.current, { setPlot:(o)=>apiRef.current.setPlot(o), markDirty:()=>apiRef.current.markDirty() });
+    const ctl = createPlotV2View(hostRef.current, {
+      setPlot:(o)=>apiRef.current.setPlot(o), setPlotAndDraft:(o,e)=>apiRef.current.setPlotAndDraft(o,e), restoreDraft:(id)=>apiRef.current.restoreDraft(id),
+      markDirty:()=>apiRef.current.markDirty(), openWriter:(r)=>apiRef.current.openWriter(r), openChar:(r)=>apiRef.current.openChar(r),
+    });
     ctlRef.current = ctl;
-    ctl.sync(data.plotV2, data.plotV2Error, data.characters, data.locations);
+    ctl.sync(data.plotV2, data.plotV2Error, data.characters, data.locations, data.drafts);
+    if(restoreState){ ctl.restoreState(restoreState); if(onRestored) onRestored(); } // キャラ資料などから戻った時は、元の位置・状態へ戻す
     return ()=>{ ctl.destroy(); ctlRef.current = null; };
   }, []);
   useEffect(()=>{
-    if(ctlRef.current) ctlRef.current.sync(data.plotV2, data.plotV2Error, data.characters, data.locations);
-  }, [data.plotV2, data.plotV2Error, data.characters, data.locations]);
+    if(ctlRef.current) ctlRef.current.sync(data.plotV2, data.plotV2Error, data.characters, data.locations, data.drafts);
+  }, [data.plotV2, data.plotV2Error, data.characters, data.locations, data.drafts]);
+  useEffect(()=>{
+    if(ctlRef.current) ctlRef.current.setWriterOpen(!!writerOpen);
+  }, [!!writerOpen]);
   return <div ref={hostRef} />;
 }
 
@@ -11364,6 +12136,12 @@ function App(){
   const [heightCompareOpen, setHeightCompareOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [saveState, setSaveState] = useState('saved');
+  const dataRef = useRef(data); dataRef.current = data; // 最新のデータ（閉じる・戻る時に今の状態を端末内へ保存するために使う）
+  const [writer, setWriter] = useState(null); // プロットの執筆モーダル：{ eventId, draftId, origin:'plot'|'reader', viewState, sel }
+  const writerBackRef = useRef(null); // 執筆モーダルが「一つ上へ戻る」処理を登録する場所
+  const plotReturnRef = useRef(null); // キャラ資料へ出ている間の戻り先：{ charId, viewState, writer }
+  const plotRestoreRef = useRef(null); // プロットへ戻った時に、元の位置・状態を復元するための一時データ
+  const pendingDetailRef = useRef(null); // 画面切り替えと同時に開く詳細ID（画面切り替え時の詳細リセットより優先する）
   const [lastImportBackup, setLastImportBackup] = useState(null); // 直前のAI一括取り込みを元に戻すための一時スナップショット（画像は含まない）
   const [writingFocusMode, setWritingFocusMode] = useState(false); // 本文の集中執筆モード（画面遷移時にリセット）
   const [writingSnippets, setWritingSnippets] = useState(loadWritingSnippets); // 表現パレット辞書（小説データ本体とは別保存）
@@ -11519,6 +12297,12 @@ function App(){
     }
   },[syncConfig,makeCloudSnapshot,syncRequest,data.plotV2Error]);
 
+  // 今すぐ端末内へ保存する（執筆モーダルを閉じる前・キャラ資料へ移る前・保存失敗後の再試行）。成功したらtrue。
+  const saveNow = () => {
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableData(dataRef.current))); setSaveState('saved'); return true; }
+    catch(e){ console.error(e); setSaveState('error'); return false; }
+  };
+
   // 保存
   useEffect(()=>{
     setSaveState('saving');
@@ -11617,7 +12401,31 @@ function App(){
   const updateRelation = (relId, patch) => setData(d=>({...d, entityRelations:(d.entityRelations||[]).map(r=>r.id===relId?{...r,...patch}:r)}));
   const deleteRelation = (relId) => setData(d=>({...d, entityRelations:(d.entityRelations||[]).filter(r=>r.id!==relId)}));
 
+  // ---- プロットの執筆モーダル／キャラ資料への行き来 ----
+  const openWriter = (req) => { setWriter(req); };
+  const closeWriter = () => { setWriter(null); };
+  // キャラ資料を開く（プロットまたは執筆モーダルから）。開く前に最新の内容を端末内へ反映し、戻り先を覚えておく。
+  const openCharFromPlot = (charId, viewState, writerState) => {
+    saveNow();
+    plotReturnRef.current = { charId, viewState:viewState||null, writer:writerState||null };
+    setWriter(null);
+    navOriginRef.current = null;
+    pendingDetailRef.current = charId;
+    setScreen('characters'); setDetailId(charId); setQuery('');
+  };
+  // キャラ資料から戻る：元のプロット（開閉状態・スクロール位置）へ。執筆モーダルから開いた場合は、その下書きのモーダルへ戻る。
+  const returnToPlot = () => {
+    const r = plotReturnRef.current; plotReturnRef.current = null;
+    if(!r) return false;
+    plotRestoreRef.current = r.viewState || null;
+    setScreen('plot'); setDetailId(null);
+    if(r.writer) setWriter(r.writer);
+    return true;
+  };
+  const isCharFromPlot = () => !!(plotReturnRef.current && screen==='characters' && detailId && plotReturnRef.current.charId===detailId);
+
   const navigateTo = (target, id) => {
+    plotReturnRef.current = null;
     navOriginRef.current = null;
     setScreen(target);
     setDetailId(id || null);
@@ -11628,6 +12436,8 @@ function App(){
   // 順に：開いているシート／ダイアログ → 検索 → 詳細 → 執筆画面内の階層（集中モード→下書き編集→一覧、章→一覧 など） → 親画面（設定の中身→設定、各画面→ホーム）。
   // 戻れる所が無い（ホーム）ときだけ false を返し、端末／ブラウザ本来の戻る（アプリを閉じる）に任せる。
   const goUp = () => {
+    if(writer){ if(writerBackRef.current && writerBackRef.current()) return true; setWriter(null); return true; }
+    if(isCharFromPlot()){ returnToPlot(); return true; }
     if(moreMenuOpen){ setMoreMenuOpen(false); return true; }
     if(syncOpen){ setSyncOpen(false); return true; }
     if(sceneFlowInsertTarget){ setSceneFlowInsertTarget(null); return true; }
@@ -11743,7 +12553,7 @@ function App(){
     body = heightCompareOpen ? (
       <HeightCompareView data={data} onBack={()=>setHeightCompareOpen(false)} />
     ) : detailId ? (
-      <CharacterDetail data={data} id={detailId} updateItem={updateItem} deleteItem={deleteItem} onBack={()=>setDetailId(null)} allOrgs={allOrgs} allLocations={allLocations} allTimeline={allTimeline} />
+      <CharacterDetail data={data} id={detailId} updateItem={updateItem} deleteItem={deleteItem} onBack={()=>{ if(isCharFromPlot()) returnToPlot(); else setDetailId(null); }} backLabel={isCharFromPlot() ? 'プロットへ戻る' : null} allOrgs={allOrgs} allLocations={allLocations} allTimeline={allTimeline} />
     ) : (
       <CharacterListView data={data} setData={setData}
         onOpen={setDetailId}
@@ -11784,7 +12594,8 @@ function App(){
   } else if(screen==='settingsHub'){
     body = <SettingsHub data={data} navigateTo={navigateTo} />;
   } else if(screen==='plot'){
-    body = <PlotV2 data={data} setData={setData} markDirty={()=>setSaveState('saving')} />;
+    body = <PlotV2 data={data} setData={setData} markDirty={()=>setSaveState('saving')} writerOpen={!!writer} onOpenWriter={openWriter}
+      onOpenChar={(req)=>openCharFromPlot(req.charId, req.viewState, null)} restoreState={plotRestoreRef.current} onRestored={()=>{ plotRestoreRef.current = null; }} />;
   } else if(screen==='plotOld'){
     body = <Plot data={data} setData={setData} allChars={allChars} allLocations={allLocations} />;
   } else if(screen==='storyTools'){
@@ -11803,7 +12614,7 @@ function App(){
     </div>;
   }
 
-  useEffect(()=>{ setDetailId(null); setWritingFocusMode(false); setMoreMenuOpen(false); setHeightCompareOpen(false); }, [screen]);
+  useEffect(()=>{ const pd = pendingDetailRef.current; pendingDetailRef.current = null; setDetailId(pd||null); setWritingFocusMode(false); setMoreMenuOpen(false); setHeightCompareOpen(false); }, [screen]);
 
   return (
     <div className="app">
@@ -11888,6 +12699,15 @@ function App(){
             </div>
           </div>
         </div>
+      )}
+      {writer && screen==='plot' && (
+        <PlotDraftWriter key={writer.eventId+'|'+writer.draftId} data={data} setData={setData} writer={writer} onClose={closeWriter}
+          onOpenChar={(cid, sel)=>openCharFromPlot(cid, writer.viewState, { ...writer, sel })}
+          saveState={saveState} onSaveNow={saveNow} backRef={writerBackRef}
+          writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary}
+          specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds}
+          mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds}
+          adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} />
       )}
       {syncOpen&&<CloudSyncModal syncConfig={syncConfig} setSyncConfig={setSyncConfig} syncState={syncState} onConnect={connectCloud} onPull={pullCloud} onPush={()=>pushCloud(false)} onClose={()=>setSyncOpen(false)} />}
       {sceneFlowInsertTarget && (()=>{
