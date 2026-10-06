@@ -940,6 +940,8 @@
   .pw-area{ flex:1 1 auto; width:100%; height:100%; min-height:0; resize:none; border:none; border-radius:0; outline:none; padding:14px 14px calc(14px + env(safe-area-inset-bottom)); line-height:2; background:#fffdf8; color:var(--ink); font-family:inherit; }
   .pw-side{ display:none; order:-1; flex:0 0 auto; max-height:38%; overflow-y:auto; -webkit-overflow-scrolling:touch; border-bottom:1px solid var(--line); padding:8px 10px; background:#faf7ef; }
   .pw-side.open{ display:block; }
+  /* 道具パネル：絶対配置をやめ、モーダル内の縦flexで専用の高さを確保する（開いた分だけ文章欄が縮む） */
+  .pw-root .snippet-palette.writing-tools-drawer{ position:static; left:auto; right:auto; bottom:auto; margin:0; max-width:none; flex:0 0 auto; max-height:min(38%,240px); overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; border-left:none; border-right:none; border-radius:0; box-shadow:0 -2px 8px rgba(30,28,25,0.10); z-index:auto; padding-bottom:env(safe-area-inset-bottom); }
   .pw-sec + .pw-sec{ margin-top:8px; }
   .pw-sl{ font-size:11px; color:var(--ink-soft); margin-bottom:2px; }
   .pw-st{ font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -6382,17 +6384,18 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
   // 記号ショートカットバー（「」――……）の常時表示は廃止。記号は「道具」シートの「よく使う文字・お気に入り」から挿入する。
   const symbolBarBlock = null;
 
-  // 執筆の2区分（文章／本文）。常に同じ並びで表示し、今どこにいるかを明確にする。
+  // 執筆の2区分（表示名は「書く／まとめる」。内部ID draft／chapters は変更しない）。常に同じ並びで表示し、今どこにいるかを明確にする。
   // シーンの地図はAI用の補助機能のため、区分とは別の小さなリンクにする。
   const switchWritingTab = (tab) => { commitInput(); setDraftMenuOpen(false); setExprDictOpen(false); setFlowOpen(false); setToolsOpen(false); setWritingMoreOpen(false); setWorkspaceTab(tab); };
   const tabsBar = (
     <div className="writing-seg-wrap">
       <div className="writing-seg" role="tablist" aria-label="執筆の区分">
-        {[['draft','📝 文章'],['chapters','📖 本文']].map(([k,l])=>(
+        {[['draft','📝 書く'],['chapters','📖 まとめる']].map(([k,l])=>(
           <button key={k} type="button" role="tab" aria-selected={workspaceTab===k} className={'writing-seg-btn'+(workspaceTab===k?' active':'')} onClick={()=>switchWritingTab(k)}>{l}</button>
         ))}
       </div>
       <button type="button" className={'writing-map-link'+(workspaceTab==='map'?' active':'')} onClick={()=>switchWritingTab('map')}>🗺 シーンの地図（AI用）</button>
+      <div className="writing-seg-cap" style={{flexBasis:'100%',fontSize:'11.5px',color:'var(--ink-soft)',marginTop:2}}>{workspaceTab==='chapters' ? 'まとめる：章・場面を並べて本文にまとめる' : workspaceTab==='draft' ? '書く：文章を作成・編集する' : ''}</div>
     </div>
   );
 
@@ -6499,8 +6502,8 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
           </div>
           {effFolderId && !textQuery && <div className="text-list-path">{textFolderLabel(effFolderId)}</div>}
           <div className="toolbar">
-            <button className="btn btn-primary" onClick={addBlankDraft}>＋ 文章</button>
-            <button className="btn btn-sm" onClick={()=>setTextDlg({type:'newFolder',name:'',parentId:effFolderId})}>＋ フォルダ</button>
+            <button className="btn btn-primary" onClick={addBlankDraft}>＋ 新規作成</button>
+            <button className="btn btn-sm" onClick={()=>setTextDlg({type:'newFolder',name:'',parentId:effFolderId})}>フォルダを作成</button>
             <button className="btn btn-sm" onClick={goToSceneFlow}>シーン進行</button>
             <span className="filler" />
             <button className="btn btn-sm" onClick={()=>{commitInput();setDraftShowTrash(true);}}>ゴミ箱（{trashedDrafts.length}）</button>
@@ -6514,7 +6517,7 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
               : textsInFolder(data,effFolderId,false)
             ).slice().sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt));
             const countIn=(fid)=>{ const ds=textFolderDescendantIds(data.textFolders,fid); ds.add(fid); return liveDrafts.filter(t=>ds.has(t.folderId)).length; };
-            if(!folders.length && !texts.length) return <div className="empty-hint">{q?'見つかりませんでした。':(effFolderId?'このフォルダは空です。':'まだ文章がありません。「＋ 文章」から始められます。')}</div>;
+            if(!folders.length && !texts.length) return <div className="empty-hint">{q?'見つかりませんでした。':(effFolderId?'このフォルダは空です。':'まだ文章がありません。「＋ 新規作成」から始められます。')}</div>;
             return <>
               {folders.map(f=>(
                 <div className="writing-list-row text-row" key={f.id}>
@@ -12184,7 +12187,17 @@ function PlotDraftWriter({ data, setData, writer, onClose, onOpenChar, saveState
     editDirtyRef.current = false; return true;
   };
   const restoreSavedSelection = () => restoreFocusAndSelection(savedSelectionRef.current.start, savedSelectionRef.current.end);
-  const toggleTools = () => { setToolsOpen(o=>{ const n=!o; if(n){ setExprDictOpen(false); setFlowOpen(false); } return n; }); };
+  const toggleTools = () => { rememberEditorState(); setToolsOpen(o=>{ const n=!o; if(n){ setExprDictOpen(false); setFlowOpen(false); } return n; }); };
+  // ---- 道具の開閉・キーボード表示で文章欄の高さが変わった時、最終行／カーソルが見える位置へ寄せる（値・選択範囲・変換中の状態は変更しない） ----
+  useEffect(()=>{
+    const el = textareaRef.current; if(!el) return;
+    const raf = requestAnimationFrame(()=>{
+      const t = textareaRef.current; if(!t) return;
+      if(t.selectionEnd >= t.value.length - 1) t.scrollTop = t.scrollHeight; // 末尾にカーソルがある時は最終行まで
+      else t.scrollTop = Math.min(savedScrollRef.current, Math.max(0, t.scrollHeight - t.clientHeight));
+    });
+    return ()=>cancelAnimationFrame(raf);
+  }, [toolsOpen, vvBox.height]);
   const openDictModal = () => { setToolsOpen(false); setFlowOpen(false); setFlowEditing(false); setAdultEdit(null); setExprDictOpen(true); };
   const openFlowModal = () => { setToolsOpen(false); setExprDictOpen(false); setAdultEdit(null); setFlowEditing(false); setFlowOpen(true); };
   const closeExprDict = () => { if(adultEdit && !confirmLeaveEdit()) return; setAdultEdit(null); setExprDictOpen(false); restoreSavedSelection(); };
@@ -12234,7 +12247,7 @@ function PlotDraftWriter({ data, setData, writer, onClose, onOpenChar, saveState
   const toolsActiveCat = toolsSnippetCats.find(c=>c.id===toolsCatId) || toolsSnippetCats[0] || null;
   const toolsCatSnippets = toolsActiveCat ? writingSnippets.snippets.filter(sn=>sn.categoryId===toolsActiveCat.id).sort((a,b)=>(a.sortOrder??0)-(b.sortOrder??0)) : [];
   const toolsBlock = toolsOpen ? (
-    <div className="snippet-palette writing-tools-drawer" style={{ position:'absolute', bottom:0 }}>
+    <div className="snippet-palette writing-tools-drawer">
       <div className="snippet-palette-head writing-tools-head">
         <div className="wt-seg" role="tablist" aria-label="道具の切替">
           <button type="button" role="tab" aria-selected={toolsMode==='fav'} className={"wt-seg-btn"+(toolsMode==='fav'?" active":"")} {...toolsBtnProps} onClick={()=>setToolsMode('fav')}>お気に入り</button>
