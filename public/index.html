@@ -11157,6 +11157,42 @@ const PLOTV2_CSS = String.raw`
   .rd-warn{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:6px 10px; }
   .rd-warn .rd-state{ color:var(--danger); font-size:13px; }
   .mode-read .toolbar,.mode-read .notice,.mode-read .linenote,.mode-read > .wrap > h1{ display:none; }
+
+  /* ===== 配色と操作の見分け（読む情報＝墨色／項目名・補足＝グレー／押せる操作＝紫＋下線） ===== */
+  .pv{ --ink:#29332F; --ink-soft:#64716B; --act:#69518C; --line-gg:#DCE5E0; }
+  .lnk{ color:var(--act); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:3px; }
+  .lnk:active{ background:rgba(105,81,140,.12); }
+  .tri{ color:var(--act); text-decoration:none; }
+  .tgl{ font-weight:700; }
+  .inl::placeholder{ color:#6F7B75; opacity:1; font-weight:400; }
+  .inl.s{ color:var(--ink); font-size:13px; }
+  .inl.lb{ color:var(--ink-soft); }
+  .lvl,.cnt,.rlab,.none-txt,.stcont{ color:var(--ink-soft); }
+  .sech{ font-size:12px; color:var(--ink-soft); }
+  .sf .sl,.wmeta,.rimgm,.rd-cap,.hint{ font-size:12px; color:var(--ink-soft); }
+  .rimgm{ font-size:11.5px; }
+  .scsum{ color:var(--ink); font-size:13px; }
+  .scsum b{ color:var(--ink-soft); }
+  .scnote{ color:var(--ink-soft); text-decoration:none; }
+  /* 直接編集の目印（鉛筆）。入力枠は常時出さない */
+  .edw{ position:relative; display:block; }
+  .edw .inl{ padding-right:20px; }
+  .pen{ position:absolute; right:2px; top:5px; font-size:12px; line-height:1; color:var(--ink-soft); pointer-events:none; }
+  .edw:focus-within .pen{ color:var(--act); }
+  /* 背景：まとまり＝淡いミント、出来事＝緑み白、文章プレビュー＝白 */
+  .v-card .event{ background:#F7FAF8; border:1px solid var(--line-gg); }
+  .v-line .event.isopen{ background:#F7FAF8; border:1px solid var(--line-gg); }
+  .wprev{ background:#FFFFFF; border:1px solid var(--line-gg); color:var(--ink); }
+  .v-line .wprev{ background:#FFFFFF; }
+  .wtxt{ color:var(--ink); }
+  .wed,.wempty{ color:var(--act); font-weight:700; font-size:12.5px; text-decoration:underline; text-underline-offset:3px; }
+  .wempty{ font-size:14px; }
+  /* 資料：キャラ（アイコン＋名前で1つの操作）は紫＋下線、場所・参考資料の名前は通常の墨色 */
+  .ppl.pplb .pname{ color:var(--act); text-decoration:underline; text-underline-offset:3px; font-weight:600; }
+  .ppl .pname{ color:var(--ink); }
+  .pplb:active{ background:rgba(105,81,140,.12); }
+  .rimgb::after{ content:'⤢'; position:absolute; right:2px; bottom:2px; width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,.92); border:1px solid var(--line-gg); color:var(--act); font-size:12px; font-weight:700; line-height:16px; text-align:center; pointer-events:none; }
+  .rimgb{ border-color:var(--line-gg); }
 `;
 
 /* ============ 新プロット：画面（最新試作の表示・操作を基準にする） ============
@@ -11212,7 +11248,8 @@ function createPlotV2View(host, api){
   const sceneFilled = n => PLOTV2_SCENE_KEYS.some(k => n.scene[k] && n.scene[k].trim());
   const plain = pvPlain;
   const find = (id) => pvFind(model.items, id);
-  const fT = (id, f, val, ph, cls) => `<textarea class="inl ag ${cls}" rows="1" data-f="${f}" data-id="${id}" placeholder="${ph}" aria-label="${ph}" autocomplete="off" enterkeyhint="next">${esc(val)}</textarea>`;
+  const PEN = '<span class="pen" aria-hidden="true">✎</span>'; // 直接編集できる場所の目印（操作ではない）
+  const fT = (id, f, val, ph, cls) => { const ta = `<textarea class="inl ag ${cls}" rows="1" data-f="${f}" data-id="${id}" placeholder="${ph}" aria-label="${ph}" autocomplete="off" enterkeyhint="next">${esc(val)}</textarea>`; return cls==='lb' ? ta : `<span class="edw">${ta}${PEN}</span>`; };
   const avatar = (c, cls) => `<span class="av ${cls||''}" data-img="${esc(c.imageId||'')}"><span class="avph">${cls==='place'?esc(c.icon):'?'}</span></span>`;
   // 取得済みの画像を表示へ反映。未取得なら既存の画像保存から読み込む（失敗・未登録は代替表示のまま。表示寸法は固定なのでレイアウトは動かない）
   //   .av＝キャラアイコン／.rimgb＝参考画像のサムネイル／.lbox＝拡大表示。画像は別々に取得しても同じキャッシュを使う。
@@ -11237,7 +11274,7 @@ function createPlotV2View(host, api){
     const el = t.parentNode; if(el && el.dataset) imgCache.set(el.dataset.img, null);
     if(el){ el.innerHTML = kind==='av' ? '<span class="avph">?</span>' : '<span class="rimgph">画像を読み込めません</span>'; }
   }, true);
-  const fA = (id, f, val, ph, cls, aria) => `<textarea class="inl ag ${cls}" rows="1" data-f="${f}" data-id="${id}" placeholder="${ph}" aria-label="${aria||ph}">${esc(val)}</textarea>`;
+  const fA = (id, f, val, ph, cls, aria) => `<span class="edw"><textarea class="inl ag ${cls}" rows="1" data-f="${f}" data-id="${id}" placeholder="${ph}" aria-label="${aria||ph}">${esc(val)}</textarea>${PEN}</span>`;
   const SCENE_FIELDS = [['goal','目的','目的を追加'],['obstacle','対立・障害','対立・障害を追加'],['change','場面で起きる変化','変化を追加'],['memo','自由メモ','メモを追加']];
   const colorOf = (id) => { let h = 0; for(const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PLOTV2_PALETTE[h % PLOTV2_PALETTE.length]; };
   const mvName = n => n.label.trim() || n.title.trim() || '未定';
@@ -11306,8 +11343,8 @@ function createPlotV2View(host, api){
       meta = `<span class="wmeta">プロットに書かれた文章（まだ文章につながっていません）</span>`;
     }
     const prev = text.trim()
-      ? `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="文章を編集する"><span class="wtxt">${esc(shown)}</span><span class="wed">タップして書く</span></button>`
-      : `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="文章を書く"><span class="wempty">文章を書く</span></button>`;
+      ? `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="文章を編集する"><span class="wtxt">${esc(shown)}</span><span class="wed">✎ 書く</span></button>`
+      : `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="文章を書く"><span class="wempty">✎ 書く</span></button>`;
     // 文章の操作（変える・解除・退避の表示）は控えめな入口へまとめる。未設定の時は「書く」「選ぶ」を出す
     const acts = ds.kind === 'ok'
       ? `<button type="button" class="lnk sm" data-act="textMenu" data-id="${n.id}" aria-label="文章の操作を開く">文章の操作</button>`
