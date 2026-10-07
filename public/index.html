@@ -11092,10 +11092,10 @@ const PLOTV2_CSS = String.raw`
   @media (max-width:600px){
     :host{ margin:0 -16px; }
     .pv{ --P:10px; --G:8px; --CP:6px; border-radius:0; }
-    .wrap{ padding:8px 8px 80px; }
+    .wrap{ padding:8px 6px 80px; }
     .movebar{ margin:0 -8px 6px; padding:6px 8px; }
-    .v-card .group{ padding:6px 8px 8px; border-radius:14px; }
-    .v-card .gbody .group{ padding:4px 6px 6px; border-radius:12px; }
+    .v-card .group{ padding:6px 6px 8px; border-radius:14px; }
+    .v-card .gbody .group{ padding:4px 4px 6px; border-radius:12px; }
     .v-card .gbody .group.deep2{ padding:3px 4px 5px; }
     .v-card .gbody .group.deep4{ padding:3px 2px 4px; }
     .v-card .event{ padding:4px 8px 4px; border-radius:10px; }
@@ -11106,6 +11106,13 @@ const PLOTV2_CSS = String.raw`
   }
 
   /* ===== 文章プレビュー・参考画像・通し読み（プロット内の執筆） ===== */
+  .sech{ font-size:11px; color:var(--ink-soft); letter-spacing:.06em; margin:12px 0 2px; }
+  .sech:first-child{ margin-top:4px; }
+  .wsub{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0 6px; }
+  .wsub .wmeta{ flex:1 1 auto; min-width:0; margin:0; }
+  .rlab{ font-size:11px; color:var(--ink-soft); }
+  .scnote{ font-size:11px; color:var(--ink-soft); font-weight:400; margin-left:2px; }
+  .tgl{ white-space:normal; text-align:left; }
   .wblock{ margin-top:2px; }
   .wmeta{ font-size:11.5px; color:var(--ink-soft); margin:0 0 2px; overflow-wrap:anywhere; }
   .wprev{ display:block; width:100%; text-align:left; border:1px solid transparent; background:rgba(255,255,255,.55); border-radius:10px; padding:6px 8px; min-height:44px; color:inherit; font:inherit; cursor:pointer; }
@@ -11119,10 +11126,11 @@ const PLOTV2_CSS = String.raw`
   .wissue{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:6px 10px; font-size:13px; color:var(--danger); }
   .wbk{ background:#f3efe6; border:1px dashed #bdb6a6; border-radius:10px; padding:6px 10px; margin:4px 0; }
   .wbk .dtext{ font-size:13px; max-height:40vh; overflow:auto; }
-  .rimgs{ display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px; margin-top:6px; }
-  .rimgw{ width:64px; min-width:0; }
+  .rimgs{ display:flex; flex-wrap:nowrap; align-items:flex-start; gap:8px; margin-top:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px; scrollbar-width:thin; }
+  .rimgadd{ flex:0 0 auto; align-self:center; }
+  .rimgw{ flex:0 0 auto; width:64px; min-width:0; }
   .rimgb{ position:relative; display:block; width:64px; height:64px; padding:0; border:1px solid #cfc8b6; border-radius:8px; background:#eae4d6; overflow:hidden; }
-  .rimgb .rimgimg{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .rimgb .rimgimg{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:block; }
   .rimgph{ display:flex; align-items:center; justify-content:center; width:100%; height:100%; font-size:11px; color:var(--ink-soft); text-align:center; }
   .rimgm{ display:block; font-size:10.5px; color:var(--ink-soft); line-height:1.3; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .lbox{ display:flex; align-items:center; justify-content:center; min-height:120px; background:#1c1b19; border-radius:10px; padding:4px; }
@@ -11248,20 +11256,21 @@ function createPlotV2View(host, api){
     const cs = chars.map(c => `<button type="button" class="ppl pplb" data-act="openChar" data-cid="${esc(c.id)}" aria-label="${esc(c.name)}の設定を開く">${avatar(c)}<span class="pname">${esc(c.name)}</span></button>`).join('');
     const ps = places.map(p => `<span class="ppl">${avatar(p,'place')}<span class="pname">${esc(p.name)}</span></span>`).join('');
     const lc = lostC ? `<span class="none-txt">（登録の無い人物 ${lostC}件）</span>` : '', lp = lostP ? `<span class="none-txt">（登録の無い場所 ${lostP}件）</span>` : '';
-    return `<div class="rline">${cs}${lc}${(chars.length||lostC)?'':'<span class="none-txt">キャラ未設定</span>'}<button class="lnk sm" data-act="pickDlg" data-id="${n.id}" data-type="chars" aria-label="キャラクターを追加・解除">＋ キャラ</button></div>
-      <div class="rline">${ps}${lp}${(places.length||lostP)?'':'<span class="none-txt">場所未設定</span>'}<button class="lnk sm" data-act="pickDlg" data-id="${n.id}" data-type="places" aria-label="場所を追加・解除">＋ 場所</button></div>`;
+    const hasC = chars.length || lostC, hasP = places.length || lostP;
+    return `${hasC ? `<div class="rline">${cs}${lc}</div>` : ''}${hasP ? `<div class="rline"><span class="rlab">場所</span>${ps}${lp}</div>` : ''}<div class="rline"><button class="lnk sm" data-act="relEdit" data-id="${n.id}" aria-label="キャラクター・場所を編集">関連資料を編集</button></div>`;
   }
   function renderEvent(n){
     const st = stMap[n.id], open = !!ui.ev[n.id], sceneOpen = !!ui.sc[n.id];
     let h = `<div class="card event${st?' st':''}${open?' isopen':''}" data-node="${n.id}"${st?` style="--stc:${esc(st.role.color)}"`:''}>`;
     if(st && st.label) h += `<div class="strow"><button class="stl" style="background:${esc(st.role.color)}" data-act="rangeDlg" data-role="${st.role.id}" aria-label="構成「${esc(st.role.name)}」の範囲を編集">${esc(st.role.name)||'（役割名なし）'}</button>${st.cont?'<span class="stcont">続き</span>':''}</div>`;
     h += `<div class="ehead" data-row="${n.id}">${fT(n.id,'title',n.title,'タイトルを入力','t')}${fA(n.id,'summary',n.summary,'概要を追加','s')}
-      <div class="tgrow"><button type="button" class="lnk tgl" data-act="toggleDetail" data-id="${n.id}" aria-expanded="${open}"><span class="tri" aria-hidden="true">${open?'▼':'▶'}</span>${open?'詳細を閉じる':'詳細を開く'}</button></div></div>`;
+      <div class="tgrow"><button type="button" class="lnk tgl" data-act="toggleDetail" data-id="${n.id}" aria-expanded="${open}"><span class="tri" aria-hidden="true">${open?'▼':'▶'}</span>${open?'出来事を閉じる':'出来事を開く'}</button></div></div>`;
     if(open){
-      h += `<div class="edetail">${writeBlockHtml(n)}${refImgsHtml(n)}${relHtml(n)}`;
+      h += `<div class="edetail"><div class="sech">文章</div>${writeBlockHtml(n)}<div class="sech">参考資料</div>${relHtml(n)}${refImgsHtml(n)}<div class="sech">シーン設計</div>`;
       if(sceneOpen) h += `<div class="scene">${SCENE_FIELDS.map(([k,l,ph]) => `<div class="sf"><div class="sl">${l}</div>${fA(n.id,'scene.'+k,n.scene[k],ph,'d',l)}</div>`).join('')}</div>`;
-      else if(n.scene.change.trim()) h += `<div class="scsum"><b>場面の変化</b>${esc(n.scene.change)}</div>`;
-      h += `<div class="erow"><button class="lnk" data-act="toggleScene" data-id="${n.id}" aria-expanded="${sceneOpen}">シーン設計${sceneFilled(n)?'（入力あり）':''} ${sceneOpen?'⌄':'›'}</button></div></div>`;
+      else if(n.scene.change.trim()) h += `<div class="scsum"><b>場面で起きる変化</b>${esc(n.scene.change)}</div>`;
+      const scHint = (!sceneOpen && !n.scene.change.trim() && sceneFilled(n)) ? '<span class="scnote">・入力あり</span>' : '';
+      h += `<div class="erow"><button class="lnk" data-act="toggleScene" data-id="${n.id}" aria-expanded="${sceneOpen}"><span class="tri" aria-hidden="true">${sceneOpen?'▼':'▶'}</span>${sceneOpen?'シーン設計を閉じる':'シーン設計を開く'}${scHint}</button></div></div>`;
     }
     return h + `</div>`;
   }
@@ -11275,6 +11284,7 @@ function createPlotV2View(host, api){
     return { kind:'ok', draft:d };
   }
   const evName = n => (n.title || '').trim() || '未定';
+  const grpName = n => (n.label || '').trim() || 'まとまり'; // 開閉の表示に使う区分名（未設定は「まとまり」）
   function usersOf(did, exceptId){ const out = []; pvForEach(model.items, x => { if(x.kind === 'event' && x.draftId === did && x.id !== exceptId) out.push(x); }); return out; }
   function linkedCount(n){ let d = 0, im = 0; const w = x => { if(x.kind === 'group') x.children.forEach(w); else { if(x.draftId) d++; im += x.images.length; } }; w(n); return { d, im }; }
   const PREVIEW_MAX = 600; // プレビュー表示だけの上限（保存文章は切り詰めない）
@@ -11291,21 +11301,22 @@ function createPlotV2View(host, api){
     let meta = '';
     if(ds.kind === 'ok'){
       const others = usersOf(n.draftId, n.id);
-      meta = `<div class="wmeta">文章「${esc(ds.draft.title)}」${others.length ? `・同じ文章を「${esc(others.map(evName).join('」「'))}」でも使っています（共有）` : ''}</div>`;
+      meta = `<span class="wmeta">文章「${esc(ds.draft.title)}」${others.length ? `・同じ文章を「${esc(others.map(evName).join('」「'))}」でも使っています（共有）` : ''}</span>`;
     } else if(text.trim()){
-      meta = `<div class="wmeta">プロットに書かれた文章（まだ文章につながっていません）</div>`;
+      meta = `<span class="wmeta">プロットに書かれた文章（まだ文章につながっていません）</span>`;
     }
     const prev = text.trim()
-      ? `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="文章を編集する"><span class="wtxt">${esc(shown)}</span><span class="wed">✎ 編集</span></button>`
-      : `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="ここから書く"><span class="wempty">✎ ここから書く</span></button>`;
+      ? `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="文章を編集する"><span class="wtxt">${esc(shown)}</span><span class="wed">タップして書く</span></button>`
+      : `<button type="button" class="wprev" data-act="openWriter" data-id="${n.id}" aria-label="文章を書く"><span class="wempty">文章を書く</span></button>`;
+    // 文章の操作（変える・解除・退避の表示）は控えめな入口へまとめる。未設定の時は「書く」「選ぶ」を出す
     const acts = ds.kind === 'ok'
-      ? `<button type="button" class="lnk sm" data-act="pickDraft" data-id="${n.id}">文章を変える</button><button type="button" class="lnk sm" data-act="unlinkAsk" data-id="${n.id}">関連を解除</button>${bkBtn}`
+      ? `<button type="button" class="lnk sm" data-act="textMenu" data-id="${n.id}" aria-label="文章の操作を開く">文章の操作</button>`
       : `<button type="button" class="lnk sm" data-act="pickDraft" data-id="${n.id}">既存の文章を選ぶ</button>`;
-    return `<div class="wblock">${meta}${prev}<div class="wacts">${acts}</div>${bkBox}</div>`;
+    return `<div class="wblock">${prev}<div class="wsub">${meta}<span class="wacts">${acts}</span></div>${bkBox}</div>`;
   }
   function refImgsHtml(n){
     const thumbs = n.images.map(im => `<div class="rimgw"><button type="button" class="rimgb" data-act="viewImg" data-id="${n.id}" data-img="${esc(im.id)}" aria-label="参考画像を拡大${im.memo ? '：' + esc(im.memo) : ''}"><span class="rimgph">…</span></button>${im.memo ? `<span class="rimgm">${esc(im.memo)}</span>` : ''}</div>`).join('');
-    return `<div class="rimgs">${thumbs}<button type="button" class="lnk sm" data-act="addImg" data-id="${n.id}" aria-label="参考画像を追加">＋ 参考画像</button></div>`;
+    return `<div class="rimgs">${thumbs}<button type="button" class="lnk sm rimgadd" data-act="addImg" data-id="${n.id}" aria-label="参考画像を追加">画像を追加</button></div>`;
   }
 
   /* ---------- 通し読み：ツリーを表示順にたどり、文章だけをつなげて表示する（別データとしては保存しない） ---------- */
@@ -11506,7 +11517,7 @@ function createPlotV2View(host, api){
     let h = `<div class="card group ${depth % 2 ? 'odd' : 'even'}${depth >= 2 ? ' deep2' : ''}${depth >= 4 ? ' deep4' : ''}" data-node="${n.id}"><div class="ghead" data-row="${n.id}">
       <div class="grow1">${depth >= 3 ? `<span class="lvl" title="${depth + 1}階層目">${depth + 1}階層</span>` : ''}${fT(n.id,'label',n.label,'区分名','lb')}${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}<span class="gacts"><button type="button" class="lnk" data-act="readGroup" data-id="${n.id}" aria-label="このまとまりだけを通し読み">通し読み</button><button type="button" class="lnk" data-act="toggleStruct" data-id="${n.id}" aria-pressed="${showSt}">${showSt?'✓ ':''}構成</button></span></div>
       ${fT(n.id,'title',n.title,'タイトルを入力','t')}${fA(n.id,'summary',n.summary,'概要を追加','s')}
-      <div class="tgrow"><button type="button" class="lnk tgl" data-act="toggle" data-id="${n.id}" aria-expanded="${!col}"><span class="tri" aria-hidden="true">${col?'▶':'▼'}</span>${col?'中身を開く':'中身を閉じる'}</button></div></div>`;
+      <div class="tgrow"><button type="button" class="lnk tgl" data-act="toggle" data-id="${n.id}" aria-expanded="${!col}"><span class="tri" aria-hidden="true">${col?'▶':'▼'}</span>${esc(grpName(n))}${col?'を開く':'を閉じる'}</button></div></div>`;
     if(!col) h += `<div class="gbody">${showSt ? strBar(n) : ''}${renderList(n.children, n.id, depth + 1)}</div>`;
     return h + `</div>`;
   }
@@ -11534,7 +11545,7 @@ function createPlotV2View(host, api){
       <div class="mvtap" data-act="mvSel" data-id="${n.id}" role="button" tabindex="0" aria-pressed="${sel}">
         <div class="grow1">${depth >= 3 ? `<span class="lvl">${depth + 1}階層</span>` : ''}<span class="lbl">${n.label.trim()?esc(n.label):'区分'}</span>${cnt?`<span class="cnt">${cnt}件${col?'・閉じています':''}</span>`:''}</div>
         <div class="ttl${n.title.trim()?'':' empty'}">${orUndecided(n.title)}</div>${n.summary.trim()?`<div class="sum clamp">${esc(n.summary)}</div>`:''}</div>
-      <div class="tgrow"><button type="button" class="lnk tgl" data-act="mvToggle" data-id="${n.id}" aria-expanded="${!col}"><span class="tri" aria-hidden="true">${col?'▶':'▼'}</span>${col?'中身を開く':'中身を閉じる'}</button></div></div>`;
+      <div class="tgrow"><button type="button" class="lnk tgl" data-act="mvToggle" data-id="${n.id}" aria-expanded="${!col}"><span class="tri" aria-hidden="true">${col?'▶':'▼'}</span>${esc(grpName(n))}${col?'を開く':'を閉じる'}</button></div></div>`;
     if(sel) h += mvActions(n.id);
     if(!col) h += `<div class="gbody">${renderMoveList(n.children, n.id, depth + 1)}</div>`;
     return h + `</div>`;
@@ -11738,6 +11749,23 @@ function createPlotV2View(host, api){
       <div class="hint">${n.kind==='group'?'中の項目もすべて一緒に移動します。':''}移動後の細かい順番は、「↑ 上へ」「↓ 下へ」で調整できます。</div>
       <div class="foot"><button class="btn" data-act="close">キャンセル</button><button class="btn primary" data-act="mvDo" data-id="${id}" data-dest="${destId||''}">移動する</button></div>`);
   }
+  // 関連資料（キャラクター・場所）の編集入口
+  function relEditDlg(id){
+    const i = find(id); if(!i) return;
+    const n = i.node;
+    openModal(`<h2>関連資料を編集</h2><div class="where">出来事：「${esc(evName(n))}」</div>
+      <div class="ops"><button class="btn" data-act="pickDlg" data-id="${id}" data-type="chars">キャラクターを選ぶ（${n.chars.length}件）</button><button class="btn" data-act="pickDlg" data-id="${id}" data-type="places">場所を選ぶ（${n.places.length}件）</button></div>
+      <div class="foot"><button class="btn primary" data-act="close">閉じる</button></div>`);
+  }
+  // 文章の操作メニュー（関連の解除は文章を削除しない）
+  function textMenuDlg(id){
+    const i = find(id); if(!i) return;
+    const n = i.node, hasDetail = !!(n.detail || '').trim();
+    openModal(`<h2>文章の操作</h2><div class="where">出来事：「${esc(evName(n))}」</div>
+      <div class="ops"><button class="btn" data-act="pickDraft" data-id="${id}">文章を変える</button><button class="btn danger" data-act="unlinkAsk" data-id="${id}">関連を解除</button>${hasDetail ? `<button class="btn" data-act="toggleBackupClose" data-id="${id}">${bk.has(id) ? '退避した元の文章を閉じる' : '退避した元の文章を見る'}</button>` : ''}</div>
+      <div class="hint">「関連を解除」は出来事との関連付けだけを外します。文章は削除されません。</div>
+      <div class="foot"><button class="btn primary" data-act="close">閉じる</button></div>`);
+  }
   function pickDlg(id, type){
     const n = find(id).node, cands = type === 'chars' ? ctx.chars : ctx.places, cur = n[type];
     const known = new Set(cands.map(c => c.id)), unknown = cur.filter(x => !known.has(x));
@@ -11800,6 +11828,7 @@ function createPlotV2View(host, api){
   root.addEventListener('click', e => {
     const t = e.target.closest('[data-act]'); if(!t) return;
     const act = t.dataset.act, id = t.dataset.id || null;
+    if(mode === 'move' && (act === 'relEdit' || act === 'textMenu')) return; // 移動モードでは編集用の入口を出さない・動かさない
     if(act === 'overlay'){ if(e.target === t){ closeModal(); if(model) render(); } return; }
     switch(act){
       case 'close': closeModal(); if(model) render(); break;
@@ -11851,6 +11880,8 @@ function createPlotV2View(host, api){
         closeModal(); render(); ensureVisible(); toast('移動しました'); break;
       }
       case 'pickDlg': pickDlg(id, t.dataset.type); break;
+      case 'relEdit': relEditDlg(id); break;
+      case 'textMenu': textMenuDlg(id); break;
       case 'pickToggle': {
         const n = find(id).node, arr = n[t.dataset.type], c = t.dataset.cid, i = arr.indexOf(c);
         if(i >= 0) arr.splice(i, 1); else arr.push(c);
@@ -11880,6 +11911,7 @@ function createPlotV2View(host, api){
       }
       case 'restoreDraft': { const i = find(id); if(i && i.node.draftId){ api.restoreDraft(i.node.draftId); } closeModal(); render(); toast('ゴミ箱から復元しました'); break; }
       case 'toggleBackup': if(bk.has(id)) bk.delete(id); else bk.add(id); render(); break;
+      case 'toggleBackupClose': if(bk.has(id)) bk.delete(id); else bk.add(id); closeModal(); render(); break;
       case 'addImg': pendingImgEvent = id; { const fi = root.getElementById('refFile'); fi.value = ''; fi.click(); } break;
       case 'viewImg': imgViewDlg(id, t.dataset.img); break;
       case 'imgUnlinkAsk': {
