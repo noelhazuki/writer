@@ -30,7 +30,45 @@ function insertOnce(text, marker, value, label) {
 
 const template = read('index.template.html');
 const styles = read('styles.css');
-const before = read('app-before-plot.jsx');
+// 結合順序（明示）。フォルダの自動列挙やファイル名の並びには依存しない。
+// この順序は分割前の src/app-before-plot.jsx の行順そのまま。
+const APP_BEFORE_PLOT_FILES = [
+  'app/01-constants-utils.jsx',
+  'app/02-writing-prefs-storage.jsx',
+  'app/03-dictionary-data.jsx',
+  'app/04-adult-tools-data.jsx',
+  'app/05-scene-story-data.jsx',
+  'app/06-adult-import-data.jsx',
+  'app/07-app-data-model.jsx',
+  'app/08-text-folders.jsx',
+  'app/09-migrate-load.jsx',
+  'app/10-ai-import-logic.jsx',
+  'app/11-image-storage.jsx',
+  'app/12-common-ui.jsx',
+  'app/13-character-list.jsx',
+  'app/14-height-compare.jsx',
+  'app/15-location-list.jsx',
+  'app/16-character-detail.jsx',
+  'app/17-organization-location-detail.jsx',
+  'app/18-world-timeline-ideas.jsx',
+  'app/19-old-plot.jsx',
+  'app/20-writing-screen.jsx',
+  'app/21-writing-support.jsx',
+  'app/22-writing-snippet-modal.jsx',
+  'app/23-dictionary-panels.jsx',
+  'app/24-dictionary-editors.jsx',
+  'app/25-ai-import-screen.jsx',
+  'app/26-search.jsx',
+  'app/27-writing-overview-adult-badges.jsx',
+  'app/28-story-tools.jsx',
+  'app/29-adult-tools-expression.jsx',
+  'app/30-adult-import-remix-flow.jsx',
+  'app/31-scene-flow-plans.jsx',
+  'app/32-adult-onomatopoeia.jsx',
+  'app/33-adult-remix-wordmap.jsx',
+  'app/34-dashboard-settings-sync.jsx',
+];
+const before = APP_BEFORE_PLOT_FILES.map(read).join('');
 const plotJsx = read('plot.jsx');
 const plotCss = read('plot.css');
 const app = read('app.jsx');
