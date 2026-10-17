@@ -4,23 +4,17 @@
     [hidden]{ display:none !important; }
   .pv{ background:var(--bg); color:var(--ink); font-family:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",sans-serif; font-size:14px; line-height:1.5; border-radius:12px; overflow-x:clip; }
   .pv.v-card{ --bg:#f6faf7; --gap:6px; }
-  .pv.v-line{ --bg:#ffffff; --gap:3px; }
   button{ font:inherit; color:inherit; cursor:pointer; }
   input,textarea,select{ color:var(--ink); }
   .wrap{ max-width:820px; margin:0 auto; padding:12px 10px 80px; }
   .pv h1{ font-family:"Hiragino Mincho ProN","Yu Mincho",serif; font-size:20px; margin:2px 0 6px; }
   .notice{ background:#fff3d6; border:1px solid #e2c985; border-radius:8px; padding:6px 10px; font-size:12px; margin-bottom:8px; }
-  .linenote{ display:none; background:#eef6f1; border:1px solid #cfe4d8; border-radius:8px; padding:6px 10px; font-size:12px; margin-bottom:8px; }
-  .v-line .linenote{ display:block; }
   .btn{ border:1px solid #bdb6a6; background:#fff; border-radius:14px; padding:5px 12px; font-size:13px; min-height:34px; }
   .btn:active{ background:#eee8d8; }
   .btn.primary{ background:#3b3f5c; color:#fff; border-color:#3b3f5c; }
   .btn.danger{ color:var(--danger); border-color:#dbb; }
   .btn:disabled{ opacity:.35; cursor:default; }
   .toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:6px 0 10px; }
-  .seg{ display:inline-flex; border:1px solid #bdb6a6; border-radius:999px; overflow:hidden; background:#fff; margin-right:6px; }
-  .seg button{ border:none; background:transparent; padding:0 14px; min-height:34px; font-size:13px; }
-  .seg button[aria-pressed="true"]{ background:#3b3f5c; color:#fff; font-weight:700; }
 
   /* 文字リンク風の操作（枠・塗りなし。小さく見えてもタップ領域は高さ36〜40px） */
   .lnk{ border:none; background:none; color:var(--teal); font-size:13px; font-weight:600; padding:0 6px; min-height:40px; display:inline-flex; align-items:center; gap:2px; border-radius:8px; white-space:nowrap; }
@@ -80,30 +74,6 @@
   .v-card .addbtn{ padding:0 6px; }
 
   /* ===== C：縦の流れ（左の細い線＝読者に見せる順番と所属。構成の帯は右端） ===== */
-  .v-line .trunk{ position:relative; padding-left:18px; }
-  .v-line .trunk::before{ content:''; position:absolute; left:5.5px; top:15px; bottom:15px; width:2px; background:var(--teal-soft); }
-  .v-line .trunk > .list-stack{ margin:4px 0; }
-  .v-line .list-stack.nest{ position:relative; padding-left:var(--P,18px); }
-  .v-line .list-stack.deep{ --P:12px; }
-  .v-line .list-stack.nest::before{ content:''; position:absolute; left:calc(var(--P,18px) - 12.25px); top:0; bottom:20px; width:1.5px; background:#c3e3d5; }
-  .v-line .list-stack.nest::after{ content:''; position:absolute; left:-11.5px; top:0; width:var(--P,18px); height:1.5px; background:#c3e3d5; }
-  .v-line .card{ border:none; background:none; border-radius:0; padding:0 8px; }
-  .v-line .event{ position:relative; padding:2px 8px; border-radius:10px; --dw:9px; --dc:#4aa88a; }
-  .v-line .event.isopen{ background:#ecf6f0; padding-bottom:6px; box-shadow:inset 2px 0 0 var(--teal-soft); }
-  .v-line .group{ --dw:10px; --dc:#3a9a7f; }
-  .v-line .list-stack.top > .group{ --dw:11px; --dc:#2f8f74; }
-  .v-line .ehead::before,.v-line .ghead::before{ content:''; position:absolute; left:calc(-19.5px - var(--dw) / 2); top:calc(16px - var(--dw) / 2); width:var(--dw); height:var(--dw); border-radius:50%; background:#fff; border:1.5px solid var(--dc); }
-  .v-line .gbody{ margin:0 -8px; }
-  .v-line .strbar{ padding-left:26px; }
-  .v-line .event.st{ padding-right:14px; }
-  .v-line .event.st::before{ right:0; top:4px; bottom:4px; border-radius:3px 0 0 3px; }
-  .v-line .strow{ justify-content:flex-end; }
-  .v-line .endcap{ position:relative; padding:4px 8px; font-weight:600; font-size:14px; color:var(--ink-soft); letter-spacing:.12em; }
-  .v-line .endcap::before{ border:none; }
-  .v-line .endcap::before{ content:''; position:absolute; left:-17px; top:50%; width:10px; height:10px; margin-top:-5px; border-radius:50%; background:#2f8f74; }
-  .v-line .addbtn{ position:relative; padding:0 8px; }
-  .v-line .addbtn::before{ content:''; position:absolute; left:-14.5px; top:50%; width:7px; height:7px; margin-top:-3.5px; border-radius:50%; background:#fff; border:1.5px solid var(--teal-soft); }
-  .v-line .edetail{ padding-left:38px; }
 
   .addbtn{ display:inline-flex; }
   .addrow{ display:flex; align-items:center; justify-content:space-between; }
@@ -124,7 +94,7 @@
   .sf .sl{ font-size:11px; color:var(--ink-soft); }
 
   /* ===== 移動モード ===== */
-  .mode-move .toolbar,.mode-move .notice,.mode-move .linenote,.mode-move h1{ display:none; }
+  .mode-move .toolbar,.mode-move .notice,.mode-move h1{ display:none; }
   .movebar{ position:sticky; top:var(--pvtop,0px); z-index:20; background:#f1ebfb; border-bottom:1px solid #dccff2; margin:0 -10px 6px; padding:6px 10px 6px; }
   .mb1{ display:flex; align-items:center; justify-content:space-between; gap:6px; }
   .mbl{ display:flex; align-items:center; gap:6px; min-width:0; }
@@ -218,7 +188,6 @@
   .tgl{ min-height:44px; padding:0 6px; font-weight:600; justify-content:flex-start; gap:4px; }
   .tri{ display:inline-block; width:1.1em; font-size:12px; text-align:center; }
   .edetail{ padding-left:2px; }
-  .v-line .edetail{ padding-left:2px; }
   .mv .mvtap{ display:block; padding:4px 0; }
   .ghead.sel{ padding:0 6px; }
   .ghead.sel .mvtap{ padding-top:4px; }
@@ -237,24 +206,6 @@
   .pick .pname{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
   .pick .ck{ flex:0 0 auto; }
 
-  /* ライン表示：字下げは1階層ごとに小さく、深い階層は上限を設ける（所属は線・点・「N階層」表示で補う） */
-  .v-line .trunk{ padding-left:calc(var(--G) + 5px); }
-  .v-line .trunk::before{ left:calc(5px - 1px); }
-  .v-line .card{ padding:0 var(--CP); }
-  .v-line .event{ padding:2px var(--CP); }
-  .v-line .list-stack.nest{ padding-left:var(--P); }
-  .v-line .list-stack.deep{ --P:6px; }
-  .v-line .list-stack.cap{ --P:0px; padding-left:6px; border-left:2px solid #c3e3d5; margin-left:2px; }
-  .v-line .list-stack.nest::before{ left:calc(var(--P) - var(--G) - .75px); }
-  .v-line .list-stack.nest::after{ left:calc(-1 * var(--G)); width:var(--P); }
-  .v-line .list-stack.cap::before,.v-line .list-stack.cap::after{ display:none; }
-  .v-line .list-stack.cap .ehead::before,.v-line .list-stack.cap .ghead::before,.v-line .list-stack.cap .addbtn::before{ display:none; }
-  .v-line .ehead::before,.v-line .ghead::before{ left:calc(-1 * (var(--CP) + var(--G)) - var(--dw) / 2); top:calc(15px - var(--dw) / 2); }
-  .v-line .gbody{ margin:0 calc(-1 * var(--CP)); }
-  .v-line .strbar{ padding-left:calc(var(--CP) + var(--P)); }
-  .v-line .addbtn::before{ left:calc(-1 * var(--G) - 3px); }
-  .v-line .endcap::before{ left:calc(-1 * var(--G) - 5px); }
-  .v-line .mode-move .ehead::before{ top:calc(15px - var(--dw) / 2); }
 
   /* カード表示：入れ子ごとに余白が積み重ならないようにする */
   .v-card .gbody .group.deep2{ padding:3px 5px 6px; }
@@ -271,7 +222,6 @@
     .v-card .gbody .group.deep4{ padding:3px 2px 4px; }
     .v-card .event{ padding:4px 8px 4px; border-radius:10px; }
     .v-card .endcap{ padding:6px 12px; }
-    .v-line .list-stack.cap{ padding-left:4px; }
     .modal{ padding:12px; }
     .rd-bar{ margin:0 -8px 6px; padding:6px 8px; }
   }
@@ -287,7 +237,6 @@
   .wblock{ margin-top:2px; }
   .wmeta{ font-size:11.5px; color:var(--ink-soft); margin:0 0 2px; overflow-wrap:anywhere; }
   .wprev{ display:block; width:100%; text-align:left; border:1px solid transparent; background:rgba(255,255,255,.55); border-radius:10px; padding:6px 8px; min-height:44px; color:inherit; font:inherit; cursor:pointer; }
-  .v-line .wprev{ background:rgba(255,255,255,.7); }
   .wprev:active{ background:rgba(31,122,99,.10); }
   .wprev:focus-visible{ outline:2px solid var(--teal-soft); }
   .wtxt{ display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.55; }
@@ -327,7 +276,7 @@
   .rd-empty span{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
   .rd-warn{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:6px 10px; }
   .rd-warn .rd-state{ color:var(--danger); font-size:13px; }
-  .mode-read .toolbar,.mode-read .notice,.mode-read .linenote,.mode-read > .wrap > h1{ display:none; }
+  .mode-read .toolbar,.mode-read .notice,.mode-read > .wrap > h1{ display:none; }
 
   /* ===== 配色と操作の見分け（読む情報＝墨色／項目名・補足＝グレー／押せる操作＝紫＋下線） ===== */
   .pv{ --ink:#29332F; --ink-soft:#64716B; --act:#69518C; --line-gg:#DCE5E0; }
@@ -352,9 +301,7 @@
   .edw:focus-within .pen{ color:var(--act); }
   /* 背景：まとまり＝淡いミント、出来事＝緑み白、文章プレビュー＝白 */
   .v-card .event{ background:#EEE7F5; border:1px solid var(--line-gg); }
-  .v-line .event.isopen{ background:#EEE7F5; border:1px solid var(--line-gg); }
   .wprev{ background:#FFFFFF; border:1px solid var(--line-gg); color:var(--ink); }
-  .v-line .wprev{ background:#FFFFFF; }
   .wtxt{ color:var(--ink); }
   .wed,.wempty{ color:var(--act); font-weight:700; font-size:12.5px; text-decoration:underline; text-underline-offset:3px; }
   .wempty{ font-size:14px; }

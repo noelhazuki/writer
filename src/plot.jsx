@@ -226,21 +226,21 @@ function pvCheckList(plot){
   return out;
 }
 
-/* ---- 端末内の表示設定（カード/ライン・通常時の開閉・構成帯の表示）。作品データとは別保存 ---- */
+/* ---- 端末内の表示設定（通常時の開閉・構成帯の表示）。作品データとは別保存。表示はカード固定（旧設定の view は読み込み時に無視し、保存時に残さない） ---- */
 function loadPlotV2Ui(){
-  const def = { view:'card', col:{}, ev:{}, sc:{}, st:{}, rh:false };
+  const def = { col:{}, ev:{}, sc:{}, st:{}, rh:false };
   try{
     const o = JSON.parse(localStorage.getItem(PLOTV2_UI_KEY) || 'null');
     if(!o || typeof o!=='object') return def;
     const m = (x) => (x && typeof x==='object' && !Array.isArray(x)) ? x : {};
-    return { view:o.view==='line'?'line':'card', col:m(o.col), ev:m(o.ev), sc:m(o.sc), st:m(o.st), rh:!!o.rh };
+    return { col:m(o.col), ev:m(o.ev), sc:m(o.sc), st:m(o.st), rh:!!o.rh };
   }catch(e){ return def; }
 }
 function savePlotV2Ui(ui, items){
   try{
     const alive = new Set(); pvForEach(items, n => alive.add(n.id));
     const keep = (o) => { const r = {}; Object.keys(o).forEach(k => { if(alive.has(k) && o[k]) r[k] = true; }); return r; };
-    localStorage.setItem(PLOTV2_UI_KEY, JSON.stringify({ view:ui.view, col:keep(ui.col), ev:keep(ui.ev), sc:keep(ui.sc), st:keep(ui.st), rh:!!ui.rh }));
+    localStorage.setItem(PLOTV2_UI_KEY, JSON.stringify({ col:keep(ui.col), ev:keep(ui.ev), sc:keep(ui.sc), st:keep(ui.st), rh:!!ui.rh }));
   }catch(e){}
 }
 
@@ -689,7 +689,7 @@ function createPlotV2View(host, api){
     const y = window.scrollY;
     if(errState){ pv.className = 'pv v-card'; wrap.innerHTML = errHtml(); return; }
     if(mode === 'read'){
-      pv.className = 'pv v-' + ui.view + ' mode-read';
+      pv.className = 'pv v-card mode-read';
       syncTop();
       wrap.innerHTML = readerHtml();
       paintIcons();
@@ -698,18 +698,13 @@ function createPlotV2View(host, api){
     }
     const move = mode === 'move';
     if(mv.sel && !find(mv.sel)) mv.sel = null;
-    pv.className = 'pv v-' + ui.view + (move ? ' mode-move' : '');
+    pv.className = 'pv v-card' + (move ? ' mode-move' : '');
     syncTop();
     stMap = pvBuildStMap(model, bandSet());
     const empty = !model.items.length;
     wrap.innerHTML = (move ? movebarHtml() : '') +
       `<h1>プロット</h1>` + (move ? '' : checkPanelHtml()) +
-      `<div class="linenote">ラインは、読者に見せる順番と所属を示します。作中の時間順や場面の地図ではありません。左の線＝順番と所属、右端の色帯と役割名ラベル＝構成です。</div>
-      <div class="toolbar">
-        <div class="seg" role="group" aria-label="表示切り替え">
-          <button type="button" data-act="setView" data-view="card" aria-pressed="${ui.view==='card'}">カード</button>
-          <button type="button" data-act="setView" data-view="line" aria-pressed="${ui.view==='line'}">ライン</button>
-        </div>
+      `<div class="toolbar">
         <button class="btn tb-read" data-act="readAll" aria-label="プロットの順に作品全体を通し読み">📖 通し読み</button>
         <button class="btn" data-act="expandAll">すべて開く</button>
         <button class="btn" data-act="collapseAll">すべて閉じる</button>
@@ -726,7 +721,7 @@ function createPlotV2View(host, api){
   const onResize = () => { growAll(); syncTop(); };
   window.addEventListener('resize', onResize);
 
-  /* 表示切り替え：見ていた要素の画面内の位置を保つ */
+  /* 見ていた要素の画面内の位置を保つ（移動モードの出入り・通し読みからの復帰で使う） */
   function captureAnchor(){
     const els = [...root.querySelectorAll('#view [data-node]')], vh = window.innerHeight;
     for(const el of els){ const r = el.getBoundingClientRect(); if(r.top >= 0 && r.top < vh) return { id:el.dataset.node, top:r.top }; }
@@ -739,11 +734,6 @@ function createPlotV2View(host, api){
     const el = root.querySelector(`#view [data-node="${a.id}"]`); if(!el) return;
     const d = el.getBoundingClientRect().top - a.top;
     if(d) window.scrollBy(0, d);
-  }
-  function setView(v){
-    if(v === ui.view) return;
-    const a = captureAnchor();
-    ui.view = v; saveUi(); render(); restoreAnchor(a);
   }
 
   /* ---------- 移動モード ---------- */
@@ -912,7 +902,7 @@ function createPlotV2View(host, api){
     if(back){ closeModal(); render(); structDlg(back.groupId, back.sid); } else { closeModal(); render(); }
   }
 
-  /* ---------- 操作の受け口（カード・ラインで共通） ---------- */
+  /* ---------- 操作の受け口 ---------- */
   root.addEventListener('click', e => {
     const t = e.target.closest('[data-act]'); if(!t) return;
     const act = t.dataset.act, id = t.dataset.id || null;
@@ -920,7 +910,6 @@ function createPlotV2View(host, api){
     if(act === 'overlay'){ if(e.target === t){ closeModal(); if(model) render(); } return; }
     switch(act){
       case 'close': closeModal(); if(model) render(); break;
-      case 'setView': setView(t.dataset.view); break;
       case 'toggle': ui.col[id] = !ui.col[id]; saveUi(); render(); break;
       case 'toggleDetail': ui.ev[id] = !ui.ev[id]; saveUi(); render(); break;
       case 'toggleScene': ui.sc[id] = !ui.sc[id]; saveUi(); render(); break;
