@@ -600,10 +600,12 @@
 
   .search-group{ margin-bottom:20px; }
   .search-group h4{ border-bottom:1px solid var(--line); padding-bottom:4px; }
-  .search-hit{ padding:10px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
-  .search-hit:hover{ background:var(--paper-dim); }
-  .search-hit .sh-name{ font-weight:700; }
-  .search-hit .sh-snippet{ font-size:12.5px; color:var(--ink-soft); }
+  .search-hit{ display:block; width:100%; text-align:left; font:inherit; color:inherit; background:none; border:none; border-bottom:1px solid var(--line); border-radius:0; padding:10px 4px; cursor:pointer; }
+  .search-hit:hover, .search-hit:focus-visible{ background:var(--paper-dim); }
+  .search-hit .sh-name{ display:block; font-weight:700; }
+  .search-hit .sh-place{ display:block; font-size:11.5px; color:var(--ink-soft); margin-top:1px; }
+  .search-hit .sh-snippet{ display:block; font-size:12.5px; color:var(--ink-soft); margin-top:2px; overflow-wrap:anywhere; }
+  .search-hit .sh-snippet mark{ background:#ffe58a; color:inherit; border-radius:2px; padding:0 1px; }
 
   .modal-backdrop{ position:fixed; inset:0; background:rgba(30,28,25,0.4); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; }
   .modal{ background:#fff; border-radius:var(--radius-m); max-width:480px; width:100%; max-height:88vh; overflow:auto; padding:20px 22px; box-shadow:0 12px 40px rgba(0,0,0,0.25); }
@@ -5618,7 +5620,7 @@ function Plot({ data, setData, allChars, allLocations }){
 /* ============ 本文 ============ */
 const WRITING_LAST_DICT_TAB_KEY='novel-world-builder-writing-last-dict-tab-v1';
 const WRITING_DICT_TABS=['expression','special','media','adult','onomatopoeia'];
-function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, adultDictionary, setAdultDictionary, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow, onOpenAdultTools, onOpenSceneFlowScreen, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId, openId, setOpenId, activeBlockId, setActiveBlockId, backRef }){
+function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, adultDictionary, setAdultDictionary, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow, onOpenAdultTools, onOpenSceneFlowScreen, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId, searchOpen, onSearchOpenHandled, openId, setOpenId, activeBlockId, setActiveBlockId, backRef }){
   // 検索結果などから特定の章を直接開きたいとき（openChapterIdが変化するたび）に本文タブへ切り替えて開く。
   useEffect(()=>{
     if(!openChapterId) return;
@@ -5630,6 +5632,38 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     setReadAll(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openChapterId]);
+  // 作品内検索の結果から、文章（「書く」）または章・場面（「まとめる」）を直接開く。依頼のたび（nonceが変わるたび）に実行する。
+  // 以前開いていた文章・フォルダ・ゴミ箱表示・文章の検索語などに妨げられず、対象のIDを開く。データは書き換えず、開く文章の指定（activeDraftId）だけを切り替える。
+  useEffect(()=>{
+    if(!searchOpen) return;
+    const r = searchOpen;
+    try{ const a=document.activeElement; if(a&&a!==document.body&&a.blur) a.blur(); }catch(e){}
+    setDraftMenuOpen(false); setFlowOpen(false); setExprDictOpen(false); setToolsOpen(false); setDraftHistoryOpen(false);
+    setTextMenu(null); setTextDlg(null); setWritingMoreOpen(false); setFocusMode(false);
+    if(r.kind==='draft'){
+      const t = (data.drafts||[]).find(x=>x.id===r.draftId && !x.deleted);
+      if(t){
+        setWorkspaceTab('draft');
+        setDraftShowTrash(false); setTextQuery('');
+        setTextFolderId(t.folderId||null);
+        hasCursorInfoRef.current=false;
+        setData(d=>({...d,activeDraftId:t.id}));
+      }
+    } else if(r.kind==='chapter'){
+      const w = (data.writings||[]).find(x=>x.id===r.chapterId);
+      if(w){
+        const rows = Array.isArray(w.blocks) ? w.blocks : [];
+        const b = rows.find(x=>x.id===r.blockId) || rows[0];
+        setWorkspaceTab('chapters');
+        setOpenId(w.id);
+        setActiveBlockId(b ? b.id : undefined);
+        setReadAll(false); setBlockDraft(null);
+        setTimeout(()=>{ try{ const el=document.querySelector('.writing-block-card.active'); if(el&&el.scrollIntoView) el.scrollIntoView({block:'center'}); }catch(e){} }, 80);
+      }
+    }
+    if(onSearchOpenHandled) onSearchOpenHandled(r.nonce);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen && searchOpen.nonce]);
   const [blockDraft,setBlockDraft]=useState(null);
   const [readAll,setReadAll]=useState(false);
   const [passageDraft,setPassageDraft]=useState(null);
@@ -8876,37 +8910,149 @@ function AiImportScreen({ data, setData, lastImportBackup, setLastImportBackup }
   );
 }
 
-/* ============ 検索 ============ */
-function SearchResults({ data, query, navigateTo }){
+/* ============ 検索 ============
+   作品内検索。検索結果の表示と移動だけを担当し、作品データは書き換えない。
+   ・文章（data.drafts・ゴミ箱は除く）／新プロット（data.plotV2）／本文（data.writings の章と場面）を含む。
+   ・移動は openResult(req) に依頼する（App側が検索状態を解除して対象画面を開く）。 */
+
+// 一致箇所の前後を短く切り出す。見つからなければ null。
+function searchContext(text, q, radius){
+  const t = String(text==null?'':text);
+  if(!q || !t) return null;
+  const i = t.indexOf(q);
+  if(i < 0) return null;
+  const r = radius || 24;
+  const from = Math.max(0, i - r), to = Math.min(t.length, i + q.length + r);
+  const flat = (x) => x.replace(/\s+/g, ' ');
+  return {
+    pre: (from > 0 ? '…' : '') + flat(t.slice(from, i)),
+    hit: flat(t.slice(i, i + q.length)),
+    post: flat(t.slice(i + q.length, to)) + (to < t.length ? '…' : ''),
+  };
+}
+// fields: [{label, text}]。最初に一致した欄の前後を返す。どれも一致しなければ最初の非空欄の先頭を返す（一致が見出しだけの時）。
+function searchSnippet(fields, q){
+  const list = (fields||[]).filter(f => f && typeof f.text === 'string' && f.text);
+  for(const f of list){
+    const c = searchContext(f.text, q);
+    if(c) return { label: f.label || '', ...c };
+  }
+  if(list.length){
+    const f = list[0];
+    const flat = f.text.replace(/\s+/g, ' ');
+    return { label: f.label || '', pre: flat.slice(0, 60) + (flat.length > 60 ? '…' : ''), hit:'', post:'' };
+  }
+  return null;
+}
+function searchStr(v){ return typeof v === 'string' ? v : (v==null ? '' : String(v)); }
+
+function SearchResults({ data, query, navigateTo, openResult }){
   const q = query.trim();
-  if(!q) return <div className="empty-hint">作品内のキャラクター・組織・場所・世界設定・年表・ネタ・本文を横断検索できます。</div>;
+  if(!q) return <div className="empty-hint">作品内のキャラクター・組織・場所・世界設定・年表・ネタ・文章・プロット・本文を横断検索できます。</div>;
 
-  const hit = (text) => text && text.includes(q);
+  const hit = (text) => typeof text === 'string' && text.includes(q);
+  const arr = (x) => Array.isArray(x) ? x : [];
   const groups = [];
+  const F = (label, text) => ({ label, text: searchStr(text) });
 
-  const chars = data.characters.filter(c => hit(c.name)||hit(c.summary)||hit(c.personality)||hit(c.memo));
-  if(chars.length) groups.push({ label:'キャラクター', items: chars.map(c=>({id:c.id,name:c.name||'（無名）',snippet:c.summary,go:()=>navigateTo('characters', c.id)})) });
+  const chars = arr(data.characters).filter(c => hit(c.name)||hit(c.summary)||hit(c.personality)||hit(c.memo));
+  if(chars.length) groups.push({ label:'キャラクター', items: chars.map(c=>({id:c.id,name:c.name||'（無名）',snippet:searchSnippet([F('',c.summary),F('',c.personality),F('メモ',c.memo)],q),go:()=>navigateTo('characters', c.id)})) });
 
-  const orgs = data.organizations.filter(o => hit(o.name)||hit(o.summary)||hit(o.purpose)||hit(o.memo));
-  if(orgs.length) groups.push({ label:'組織 / 勢力 / 家系', items: orgs.map(o=>({id:o.id,name:o.name||'（無名）',snippet:o.summary,go:()=>navigateTo('organizations', o.id)})) });
+  const orgs = arr(data.organizations).filter(o => hit(o.name)||hit(o.summary)||hit(o.purpose)||hit(o.memo));
+  if(orgs.length) groups.push({ label:'組織 / 勢力 / 家系', items: orgs.map(o=>({id:o.id,name:o.name||'（無名）',snippet:searchSnippet([F('',o.summary),F('',o.purpose),F('メモ',o.memo)],q),go:()=>navigateTo('organizations', o.id)})) });
 
-  const locs = data.locations.filter(l => hit(l.name)||hit(l.summary)||hit(l.memo));
-  if(locs.length) groups.push({ label:'場所 / 建物', items: locs.map(l=>({id:l.id,name:l.name||'（無名）',snippet:l.summary,go:()=>navigateTo('locations', l.id)})) });
+  const locs = arr(data.locations).filter(l => hit(l.name)||hit(l.summary)||hit(l.memo));
+  if(locs.length) groups.push({ label:'場所 / 建物', items: locs.map(l=>({id:l.id,name:l.name||'（無名）',snippet:searchSnippet([F('',l.summary),F('メモ',l.memo)],q),go:()=>navigateTo('locations', l.id)})) });
 
   const wsHits = [];
-  data.worldSettings.forEach(cat => cat.cards.forEach(card => {
-    if(hit(card.title)||hit(card.content)) wsHits.push({id:card.id, name:`${cat.name} ／ ${card.title||'（無題）'}`, snippet:card.content, go:()=>navigateTo('worldsettings')});
+  arr(data.worldSettings).forEach(cat => arr(cat && cat.cards).forEach(card => {
+    if(hit(card.title)||hit(card.content)) wsHits.push({id:card.id, name:`${cat.name||''} ／ ${card.title||'（無題）'}`, snippet:searchSnippet([F('',card.content)],q), go:()=>navigateTo('worldsettings')});
   }));
   if(wsHits.length) groups.push({ label:'世界設定', items: wsHits });
 
-  const tl = data.timeline.filter(t => hit(t.title)||hit(t.summary)||hit(t.detail));
-  if(tl.length) groups.push({ label:'年表', items: tl.map(t=>({id:t.id,name:t.title||'（無題）',snippet:t.summary,go:()=>navigateTo('timeline')})) });
+  const tl = arr(data.timeline).filter(t => hit(t.title)||hit(t.summary)||hit(t.detail));
+  if(tl.length) groups.push({ label:'年表', items: tl.map(t=>({id:t.id,name:t.title||'（無題）',snippet:searchSnippet([F('',t.summary),F('',t.detail)],q),go:()=>navigateTo('timeline')})) });
 
-  const ideas = data.ideas.filter(i => hit(i.content));
-  if(ideas.length) groups.push({ label:'ネタ箱', items: ideas.map(i=>({id:i.id,name:i.type,snippet:i.content,go:()=>navigateTo('ideas')})) });
+  const ideas = arr(data.ideas).filter(i => hit(i.content));
+  if(ideas.length) groups.push({ label:'ネタ箱', items: ideas.map(i=>({id:i.id,name:i.type||'ネタ',snippet:searchSnippet([F('',i.content)],q),go:()=>navigateTo('ideas')})) });
 
-  const writings = data.writings.filter(w => hit(w.title)||hit(w.body));
-  if(writings.length) groups.push({ label:'本文', items: writings.map(w=>({id:w.id,name:w.title,snippet:w.body.slice(0,60),go:()=>navigateTo('writing', w.id)})) });
+  // ---- 文章（「書く」）：削除されていない文章をID単位で一件ずつ。ゴミ箱・履歴は対象外。出来事からの参照数には影響されない。 ----
+  const folders = arr(data.textFolders);
+  const folderPathLabel = (fid) => {
+    if(!fid) return 'フォルダ外';
+    const names = []; const seen = new Set(); let cur = fid;
+    while(cur && !seen.has(cur)){ seen.add(cur); const f = folders.find(x => x && x.id === cur); if(!f) break; names.unshift(f.name || '無題のフォルダ'); cur = f.parentId; }
+    return names.length ? names.join(' › ') : 'フォルダ外';
+  };
+  const seenDraft = new Set();
+  const drafts = arr(data.drafts).filter(d => {
+    if(!d || !d.id || d.deleted || seenDraft.has(d.id)) return false;
+    seenDraft.add(d.id);
+    return hit(d.title)||hit(d.body)||hit(d.memo);
+  });
+  if(drafts.length) groups.push({ label:'文章', items: drafts.map(d=>({
+    id:d.id, name:d.title||'（無題）', place:folderPathLabel(d.folderId),
+    snippet:searchSnippet([F('',d.body),F('メモ',d.memo)],q),
+    go:()=>openResult({ kind:'draft', draftId:d.id }),
+  })) });
+
+  // ---- 新プロット：まとまり／出来事。関連文章の本文は文章側で検索するので、ここでは対象にしない。 ----
+  const plotGroups = [], plotEvents = [];
+  const plot = data.plotV2;
+  const groupName = (n) => [n.label, n.title].map(searchStr).filter(x=>x.trim()).join(' ') || 'まとまり';
+  const walkPlot = (list, trail, depth) => {
+    if(depth > 200) return;
+    arr(list).forEach(n => {
+      if(!n || typeof n !== 'object') return;
+      if(n.kind === 'group'){
+        if(hit(n.label)||hit(n.title)||hit(n.summary)){
+          plotGroups.push({ id:n.id, name:groupName(n), place:trail.join(' › ') || '最上位',
+            snippet:searchSnippet([F('',n.summary)],q),
+            go:()=>openResult({ kind:'plot', nodeId:n.id, openScene:false }) });
+        }
+        walkPlot(n.children, trail.concat([groupName(n)]), depth + 1);
+      } else if(n.kind === 'event'){
+        const sc = (n.scene && typeof n.scene === 'object') ? n.scene : {};
+        const fields = [F('', n.summary), F('目的', sc.goal), F('対立・障害', sc.obstacle), F('変化', sc.change), F('自由メモ', sc.memo), F('旧本文', n.detail)];
+        if(hit(n.title)||fields.some(f=>hit(f.text))){
+          const inScene = ['goal','obstacle','change','memo'].some(k => hit(sc[k]));
+          plotEvents.push({ id:n.id, name:searchStr(n.title).trim()||'未定', place:trail.join(' › ') || '最上位',
+            snippet:searchSnippet(fields,q),
+            go:()=>openResult({ kind:'plot', nodeId:n.id, openScene:inScene }) });
+        }
+      }
+    });
+  };
+  if(plot && typeof plot === 'object') walkPlot(plot.items, [], 0);
+  if(plotGroups.length) groups.push({ label:'プロット：まとまり', items: plotGroups });
+  if(plotEvents.length) groups.push({ label:'プロット：出来事', items: plotEvents });
+
+  // ---- 本文（「まとめる」）：章タイトル＋各章の場面（タイトル・本文・メモ）。
+  //      場面（blocks）がある章は blocks だけを見る（章のbodyは場面本文の連結なので、使うと二重に出る）。
+  //      blocks が無い古いデータだけ、章の旧body を一件の本文として検索する。 ----
+  const chapterItems = [], sceneItems = [];
+  arr(data.writings).forEach(w => {
+    if(!w || !w.id) return;
+    const chName = searchStr(w.title).trim() || '（無題の章）';
+    if(hit(w.title)) chapterItems.push({ id:'ch:'+w.id, name:chName, place:'章', snippet:null, go:()=>openResult({ kind:'chapter', chapterId:w.id, blockId:null }) });
+    const blocks = arr(w.blocks);
+    if(blocks.length){
+      blocks.forEach(b => {
+        if(!b || typeof b !== 'object') return;
+        if(hit(b.title)||hit(b.body)||hit(b.memo)){
+          sceneItems.push({ id:'bl:'+w.id+':'+(b.id||''), name:searchStr(b.title).trim()||'（無題の場面）', place:'章：'+chName+' ／ 場面',
+            snippet:searchSnippet([F('',b.body),F('メモ',b.memo)],q),
+            go:()=>openResult({ kind:'chapter', chapterId:w.id, blockId:b.id||null }) });
+        }
+      });
+    } else if(hit(w.body)){
+      sceneItems.push({ id:'ob:'+w.id, name:chName, place:'章：'+chName+' ／ 旧本文',
+        snippet:searchSnippet([F('',w.body)],q),
+        go:()=>openResult({ kind:'chapter', chapterId:w.id, blockId:null }) });
+    }
+  });
+  const writingItems = chapterItems.concat(sceneItems);
+  if(writingItems.length) groups.push({ label:'本文', items: writingItems });
 
   return (
     <div>
@@ -8916,17 +9062,17 @@ function SearchResults({ data, query, navigateTo }){
         <div className="search-group" key={g.label}>
           <h4>{g.label}（{g.items.length}）</h4>
           {g.items.map(it=>(
-            <div className="search-hit" key={it.id} onClick={it.go}>
-              <div className="sh-name">{it.name}</div>
-              {it.snippet && <div className="sh-snippet">{it.snippet.slice(0,60)}</div>}
-            </div>
+            <button type="button" className="search-hit" key={it.id} onClick={it.go}>
+              <span className="sh-name">{it.name}</span>
+              {it.place && <span className="sh-place">{it.place}</span>}
+              {it.snippet && <span className="sh-snippet">{it.snippet.label && <span className="sh-label">{it.snippet.label}：</span>}{it.snippet.pre}{it.snippet.hit && <mark>{it.snippet.hit}</mark>}{it.snippet.post}</span>}
+            </button>
           ))}
         </div>
       ))}
     </div>
   );
 }
-
 /* ============ 成人向け創作ツール（独立screen） ============
    通常の辞典ドロワーには混ぜず、screen='adultTools' の独立画面として持つ。
    画面内タブ：[表現辞典]／[トーン検索]／[語句魔改造]／[語句マップ]
@@ -10827,7 +10973,7 @@ function savePlotV2Ui(ui, items){
   }catch(e){}
 }
 
-const PLOTV2_CSS = "\n  :host{ display:block; } .pv{ --ink:#2b2a27; --ink-soft:#6b665c; --teal:#1f7a63; --teal-soft:#a8d5c3; --purple:#6b4fa0; --danger:#8a3a3a; }\n  *{ box-sizing:border-box; }\n    [hidden]{ display:none !important; }\n  .pv{ background:var(--bg); color:var(--ink); font-family:\"Zen Kaku Gothic New\",\"Hiragino Sans\",\"Yu Gothic\",sans-serif; font-size:14px; line-height:1.5; border-radius:12px; overflow-x:clip; }\n  .pv.v-card{ --bg:#f6faf7; --gap:6px; }\n  button{ font:inherit; color:inherit; cursor:pointer; }\n  input,textarea,select{ color:var(--ink); }\n  .wrap{ max-width:820px; margin:0 auto; padding:12px 10px 80px; }\n  .pv h1{ font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-size:20px; margin:2px 0 6px; }\n  .notice{ background:#fff3d6; border:1px solid #e2c985; border-radius:8px; padding:6px 10px; font-size:12px; margin-bottom:8px; }\n  .btn{ border:1px solid #bdb6a6; background:#fff; border-radius:14px; padding:5px 12px; font-size:13px; min-height:34px; }\n  .btn:active{ background:#eee8d8; }\n  .btn.primary{ background:#3b3f5c; color:#fff; border-color:#3b3f5c; }\n  .btn.danger{ color:var(--danger); border-color:#dbb; }\n  .btn:disabled{ opacity:.35; cursor:default; }\n  .toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:6px 0 10px; }\n\n  /* 文字リンク風の操作（枠・塗りなし。小さく見えてもタップ領域は高さ36〜40px） */\n  .lnk{ border:none; background:none; color:var(--teal); font-size:13px; font-weight:600; padding:0 6px; min-height:40px; display:inline-flex; align-items:center; gap:2px; border-radius:8px; white-space:nowrap; }\n  .lnk:active{ background:rgba(31,122,99,.12); }\n  .lnk.sm{ min-height:36px; font-size:12px; }\n  .lnk[aria-pressed=\"true\"]{ text-decoration:underline; text-underline-offset:4px; }\n\n  /* 共通の骨格（色・枠・線は下の表示別ルールで切り替える） */\n  .card{ min-width:0; }\n  .tog{ flex:0 0 auto; width:32px; height:32px; border:none; background:transparent; color:#55705f; font-size:13px; padding:0; line-height:1; border-radius:8px; }\n  .tog:active{ background:rgba(0,0,0,.07); }\n  .ghead,.ehead{ display:flex; align-items:flex-start; gap:6px; position:relative; }\n  .gleft{ flex:0 0 auto; display:flex; align-items:center; gap:2px; max-width:40%; }\n    .gright, .emain{ flex:1 1 auto; min-width:0; padding:3px 0 0; }\n    .gact{ flex:0 0 auto; }\n  .ttl{ font-weight:700; font-size:16px; line-height:1.4; overflow-wrap:anywhere; word-break:normal; }\n  .sum{ font-size:12px; color:var(--ink-soft); overflow-wrap:anywhere; margin-top:1px; }\n  .cnt{ font-size:11px; color:var(--ink-soft); font-weight:400; margin-left:6px; white-space:nowrap; }\n  .gbody{ margin-top:var(--gap); }\n  .list-stack > * + *{ margin-top:var(--gap); }\n  .emptyg{ font-size:12px; color:var(--ink-soft); padding:2px 8px; }\n\n  /* 展開した出来事の中身：概要・キャラ・場所は囲み箱にせず、文字と丸い画像で並べる */\n  .edetail{ margin-top:2px; padding-left:38px; }\n  .dtext{ white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; }\n  .dtext.none{ color:var(--ink-soft); }\n  .rline{ display:flex; flex-wrap:wrap; align-items:center; gap:2px 12px; margin-top:4px; }\n  .ppl{ display:inline-flex; align-items:center; gap:6px; font-size:13px; min-width:0; }\n  .av{ width:28px; height:28px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:15px; color:#fff; flex:0 0 auto; line-height:1; }\n  .av.place{ background:#dfe8e2; color:#3f5a4d; }\n  .pname{ overflow-wrap:anywhere; }\n  .none-txt{ font-size:12px; color:var(--ink-soft); }\n  .scsum{ margin-top:6px; font-size:12px; border-left:2px solid var(--teal-soft); padding-left:8px; color:#4a463d; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }\n  .scsum b{ font-weight:700; color:var(--ink-soft); margin-right:4px; }\n\n  /* 構成：帯（細い色）とラベルだけに色を使う */\n  .event.st{ --stc:#999; }\n  .event.st::before{ content:''; position:absolute; width:4px; background:var(--stc); }\n  .strow{ display:flex; align-items:center; gap:6px; margin-bottom:2px; }\n  .stl{ border:none; color:#fff; border-radius:10px; padding:2px 12px; font-size:12px; font-weight:700; min-height:28px; }\n  .stcont{ font-size:11px; color:var(--ink-soft); }\n  .strbar{ display:flex; flex-wrap:wrap; gap:0 8px; align-items:center; padding:0 4px; }\n  .stchip{ border:none; border-bottom:2px solid var(--stc,#bdb6a6); background:transparent; padding:0 4px; font-size:12px; min-height:34px; }\n  .stchip.warn{ border-bottom-color:var(--danger); color:var(--danger); font-weight:700; }\n  .stunset{ display:inline-flex; align-items:center; gap:0; font-size:12px; color:var(--ink-soft); }\n\n  /* ===== B：淡いカード ===== */\n  .v-card .card{ border:1px solid transparent; }\n  .v-card .group{ background:#e6f3ec; border-radius:18px; padding:6px 10px 10px; }\n  .v-card .gbody .group{ background:#fafdfb; border-radius:14px; padding:4px 8px 8px; }\n  .v-card .gbody .group.even{ background:#e6f3ec; }\n  .v-card .gbody .group.deep2{ padding:3px 5px 6px; }\n  .v-card .event{ position:relative; background:#fdf5e1; border-radius:12px; padding:4px 10px 8px; }\n  .v-card .event.st::before{ left:0; top:8px; bottom:8px; border-radius:0 3px 3px 0; }\n  .v-card .endcap{ background:#e6e9ec; border-radius:12px; padding:8px 14px; font-weight:600; font-size:14px; color:#4a5560; letter-spacing:.12em; }\n  .v-card .trunk > .list-stack{ margin:10px 0; }\n  .v-card .addbtn{ padding:0 6px; }\n\n  /* ===== C：縦の流れ（左の細い線＝読者に見せる順番と所属。構成の帯は右端） ===== */\n\n  .addbtn{ display:inline-flex; }\n  .addrow{ display:flex; align-items:center; justify-content:space-between; }\n  .erow{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; margin-top:2px; }\n\n  /* 直接編集：普段は文章に見せ、フォーカス中だけ薄い背景と枠で編集箇所を示す */\n  .inl{ display:block; width:calc(100% + 8px); margin:0 -4px; padding:2px 4px; font:inherit; color:inherit; background:transparent; border:none; border-radius:6px; outline:none; resize:none; overflow:hidden; box-shadow:0 0 0 1.5px transparent; cursor:text; }\n  .inl::placeholder{ color:#aaa597; font-weight:400; }\n  .inl:focus{ background:rgba(31,122,99,.07); box-shadow:0 0 0 1.5px var(--teal-soft); }\n  .inl.t{ font-size:16px; font-weight:700; line-height:1.4; text-overflow:ellipsis; }\n  .inl.s{ font-size:12px; color:var(--ink-soft); line-height:1.5; }\n  .inl.d{ font-size:14px; line-height:1.5; }\n  .inl.lb{ width:4.2em; max-width:100%; margin:0; font-size:13px; font-weight:700; color:#3f6a55; min-height:32px; line-height:1.4; }\n  .trow{ display:flex; align-items:center; gap:4px; }\n  .trow .inl{ width:auto; flex:1 1 auto; min-width:0; margin:0 0 0 -4px; }\n  .scene{ margin-top:6px; padding-left:8px; border-left:2px solid var(--teal-soft); }\n  .sf + .sf{ margin-top:4px; }\n  .sf .sl{ font-size:11px; color:var(--ink-soft); }\n\n  /* ===== 移動モード ===== */\n  .mode-move .toolbar,.mode-move .notice,.mode-move h1{ display:none; }\n  .movebar{ position:sticky; top:var(--pvtop,0px); z-index:20; background:#f1ebfb; border-bottom:1px solid #dccff2; margin:0 -10px 6px; padding:6px 10px 6px; }\n  .mb1{ display:flex; align-items:center; justify-content:space-between; gap:6px; }\n  .mbl{ display:flex; align-items:center; gap:6px; min-width:0; }\n  .mbt{ font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-size:19px; font-weight:700; line-height:1.3; white-space:nowrap; }\n  .mbadge{ flex:0 1 auto; background:#7b5cc4; color:#fff; border-radius:999px; padding:1px 10px; font-size:11px; font-weight:700; white-space:nowrap; }\n  .mbr{ display:flex; align-items:center; gap:2px; flex:0 0 auto; }\n  .movebar .lnk{ color:#6b4fa0; min-height:36px; }\n  .btn.done{ background:#6b4fa0; border-color:#6b4fa0; color:#fff; font-weight:700; padding:0 14px; min-height:36px; white-space:nowrap; }\n  .mb2{ display:flex; align-items:center; gap:8px; min-height:24px; }\n  .mbh{ flex:1 1 auto; min-width:0; font-size:12.5px; color:#4a3b73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }\n  #mbpath{ flex:0 1 auto; min-width:0; max-width:46%; }\n  .pathpill{ display:block; background:#e4daf7; border-radius:10px; padding:1px 10px; font-size:11.5px; color:#4a3b73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }\n  .mbwarn{ font-size:12px; color:var(--danger); margin-top:4px; }\n  .mbwarn:empty{ display:none; }\n  .lnk:disabled{ opacity:.35; cursor:default; }\n  .mvtap{ cursor:pointer; }\n  .tgsp{ flex:0 0 auto; width:6px; }\n  .lbl{ display:flex; align-items:center; font-weight:700; font-size:13px; color:#3f6a55; min-height:32px; padding:0 2px; overflow-wrap:anywhere; min-width:0; }\n  .ttl.empty{ color:var(--ink-soft); font-weight:400; }\n  .mv .ttl{ font-size:15px; }\n  .sum.clamp{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }\n  .mode-move .event.mv{ padding-bottom:4px; }\n  .card.sel{ background:#ece4fa !important; box-shadow:inset 3px 0 0 #7b5cc4; }\n  .ghead.sel{ background:#ece4fa; box-shadow:inset 3px 0 0 #7b5cc4; border-radius:10px; padding:0 6px; }\n  .mvact{ display:flex; gap:8px; padding:6px 0 4px 8px; }\n  .mvact .btn{ flex:1 1 0; min-width:0; max-width:130px; padding:0 6px; white-space:nowrap; }\n  .mode-move .list-stack.nest::before{ bottom:14px; }\n  .dest .dpath{ display:block; font-size:11px; color:var(--ink-soft); }\n  .dest .dt{ font-weight:700; }\n  .dest .dnote{ display:block; font-size:11px; color:var(--danger); }\n\n  /* モーダル・メニュー */\n  .overlay{ position:fixed; inset:0; background:rgba(30,28,25,.45); z-index:50; display:flex; align-items:flex-end; justify-content:center; }\n  .modal{ background:#fffdf8; width:100%; max-width:560px; max-height:90vh; overflow-y:auto; overscroll-behavior:contain; border-radius:16px 16px 0 0; padding:14px; }\n  @media (min-width:700px){ .overlay{ align-items:center; } .modal{ border-radius:16px; } }\n  .modal h2{ font-size:16px; margin:0 0 6px; }\n  .where{ font-size:12px; background:#eef6e8; border:1px solid #b7d3a5; border-radius:8px; padding:4px 8px; margin-bottom:6px; overflow-wrap:anywhere; }\n  .where.warn{ background:#fbeeee; border-color:#dbb; color:var(--danger); }\n  .field{ margin:8px 0; }\n  .field label{ display:block; font-size:12px; color:var(--ink-soft); margin-bottom:2px; }\n  .field input,.field textarea,.field select{ width:100%; font:inherit; font-size:16px; border:1px solid #bdb6a6; border-radius:8px; padding:8px; background:#fff; }\n  .field textarea{ min-height:120px; resize:vertical; }\n  .field textarea.sm{ min-height:72px; }\n  .err{ color:var(--danger); font-size:12px; }\n  .kindsel{ display:flex; gap:8px; margin:6px 0; }\n  .kindsel button{ flex:1; border:1.5px solid #bdb6a6; background:#fff; border-radius:10px; padding:8px; }\n  .kindsel button.on{ border-color:var(--purple); background:#efe9fa; font-weight:700; }\n  .opsec{ margin-top:12px; padding-top:8px; border-top:1px solid #e0d9c6; }\n  .ops{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }\n  .foot{ display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; margin-top:10px; }\n  .dest{ display:block; width:100%; text-align:left; border:1px solid #bdb6a6; background:#fff; border-radius:8px; padding:8px 10px; margin:4px 0; overflow-wrap:anywhere; }\n  .dest[disabled]{ opacity:.4; background:#eee; }\n  .hint{ font-size:12px; color:var(--ink-soft); }\n  .pos{ display:flex; gap:12px; margin:6px 0; font-size:14px; }\n  .pick{ display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:1px solid #bdb6a6; background:#fff; border-radius:10px; padding:6px 10px; margin:4px 0; }\n  .pick.on{ border-color:var(--purple); background:#efe9fa; }\n  .pick .ck{ margin-left:auto; font-weight:700; color:var(--purple); }\n  .toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:rgba(30,28,25,.9); color:#fff; padding:8px 14px; border-radius:999px; font-size:13px; z-index:80; max-width:90vw; }\n\n  /* ===== 本体統合で追加 ===== */\n  .tbsp{ margin-left:auto; }\n  .chkpanel{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:8px 10px; margin:0 0 10px; font-size:13px; }\n  .chkpanel h2{ font-size:14px; margin:0 0 4px; color:var(--danger); }\n  .chkrow{ padding:6px 0; border-top:1px dashed #dbb; }\n  .chkrow:first-of-type{ border-top:none; }\n  .chkrow .why{ color:var(--danger); font-size:12px; }\n  .chkrow .ops{ margin-top:2px; }\n  .errbox{ background:#fbeeee; border:1px solid #d9a3a3; border-radius:10px; padding:10px 12px; color:var(--danger); margin:8px 0; }\n  .errbox textarea{ width:100%; min-height:140px; font-size:12px; margin-top:6px; }\n  .rolerow{ border:1px solid #d8d1c0; border-radius:10px; padding:6px 8px; margin:6px 0; background:#fff; }\n  .rolerow .rr1{ display:flex; gap:6px; align-items:center; }\n  .rolerow input[type=text]{ flex:1 1 auto; min-width:0; font:inherit; font-size:16px; border:1px solid #bdb6a6; border-radius:8px; padding:4px 8px; }\n  .rolerow input[type=color]{ width:40px; height:34px; padding:0; border:1px solid #bdb6a6; border-radius:8px; background:#fff; }\n  .rolerow .rr2{ font-size:12px; margin-top:2px; color:var(--ink-soft); }\n  .rolerow .rr2.warn{ color:var(--danger); font-weight:700; }\n  .emptyall{ background:#fff; border:1px dashed #bdb6a6; border-radius:12px; padding:14px; margin:8px 0; color:var(--ink-soft); text-align:center; }\n  .stwarn{ color:var(--danger); font-size:12px; }\n\n  /* ===== スマホ幅対応・開閉操作・アイコン（新プロットの中だけに適用） ===== */\n  .pv{ --P:12px; --G:9px; --CP:8px; }\n  .ghead,.ehead{ display:block; position:relative; }\n  .grow1{ display:flex; flex-wrap:wrap; align-items:center; gap:0 8px; min-width:0; }\n  .grow1 .inl.lb{ flex:1 1 4.6em; width:auto; min-width:4.2em; max-width:100%; margin:0 0 0 -4px; min-height:32px; }\n  .grow1 .cnt{ margin-left:0; }\n  .grow1 .gacts{ margin-left:auto; }\n  .grow1 .lbl{ flex:1 1 4.6em; min-width:4.2em; overflow-wrap:anywhere; }\n  .lvl{ flex:0 0 auto; font-size:10.5px; color:var(--ink-soft); border:1px solid #cfe4d8; background:#fff; border-radius:8px; padding:0 6px; white-space:nowrap; }\n  .inl.t{ text-overflow:clip; white-space:pre-wrap; overflow-wrap:anywhere; }\n  .inl.s{ overflow-wrap:anywhere; }\n  .tgrow{ display:flex; margin-top:0; }\n  .tgl{ min-height:44px; padding:0 6px; font-weight:600; justify-content:flex-start; gap:4px; }\n  .tri{ display:inline-block; width:1.1em; font-size:12px; text-align:center; }\n  .edetail{ padding-left:2px; }\n  .mv .mvtap{ display:block; padding:4px 0; }\n  .ghead.sel{ padding:0 6px; }\n  .ghead.sel .mvtap{ padding-top:4px; }\n  .mvact{ padding-left:2px; }\n  .kinddesc{ font-size:12px; color:var(--ink-soft); margin:2px 0 8px; }\n  .kinddesc div{ padding:1px 0; }\n  .kinddesc .on{ color:var(--ink); }\n  .kinddesc .on b{ color:var(--purple); }\n  .av{ position:relative; width:28px; height:28px; border-radius:50%; overflow:hidden; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; background:var(--paper-dim,#eae4d6); border:1px solid var(--line,#ddd5c3); color:var(--ink-soft); font-size:12px; line-height:1; }\n  .av.place{ background:#dfe8e2; color:#3f5a4d; }\n  .av.place .avph{ font-size:15px; }\n  .av .avimg{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }\n  .ppl{ align-items:center; max-width:100%; }\n  .pname{ min-width:0; overflow-wrap:anywhere; }\n  .pick .av{ width:36px; height:36px; }\n  .pick .pname{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }\n  .pick .ck{ flex:0 0 auto; }\n\n\n  /* カード表示：入れ子ごとに余白が積み重ならないようにする */\n  .v-card .gbody .group.deep2{ padding:3px 5px 6px; }\n  .v-card .gbody .group.deep4{ padding:3px 2px 5px; }\n\n  @media (max-width:600px){\n    :host{ margin:0 -16px; }\n    .pv{ --P:10px; --G:8px; --CP:6px; border-radius:0; }\n    .wrap{ padding:8px 6px 80px; }\n    .movebar{ margin:0 -8px 6px; padding:6px 8px; }\n    .v-card .group{ padding:6px 6px 8px; border-radius:14px; }\n    .v-card .gbody .group{ padding:4px 4px 6px; border-radius:12px; }\n    .v-card .gbody .group.deep2{ padding:3px 4px 5px; }\n    .v-card .gbody .group.deep4{ padding:3px 2px 4px; }\n    .v-card .event{ padding:4px 8px 4px; border-radius:10px; }\n    .v-card .endcap{ padding:6px 12px; }\n    .modal{ padding:12px; }\n    .rd-bar{ margin:0 -8px 6px; padding:6px 8px; }\n  }\n\n  /* ===== 文章プレビュー・参考画像・通し読み（プロット内の執筆） ===== */\n  .sech{ font-size:11px; color:var(--ink-soft); letter-spacing:.06em; margin:12px 0 2px; }\n  .sech:first-child{ margin-top:4px; }\n  .wsub{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0 6px; }\n  .wsub .wmeta{ flex:1 1 auto; min-width:0; margin:0; }\n  .rlab{ font-size:11px; color:var(--ink-soft); }\n  .scnote{ font-size:11px; color:var(--ink-soft); font-weight:400; margin-left:2px; }\n  .tgl{ white-space:normal; text-align:left; }\n  .wblock{ margin-top:2px; }\n  .wmeta{ font-size:11.5px; color:var(--ink-soft); margin:0 0 2px; overflow-wrap:anywhere; }\n  .wprev{ display:block; width:100%; text-align:left; border:1px solid transparent; background:rgba(255,255,255,.55); border-radius:10px; padding:6px 8px; min-height:44px; color:inherit; font:inherit; cursor:pointer; }\n  .wprev:active{ background:rgba(31,122,99,.10); }\n  .wprev:focus-visible{ outline:2px solid var(--teal-soft); }\n  .wtxt{ display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.55; }\n  .wed{ display:block; text-align:right; font-size:11px; color:var(--teal); margin-top:1px; }\n  .wempty{ display:block; color:var(--teal); font-weight:600; font-size:14px; padding:4px 0; }\n  .wacts{ display:flex; flex-wrap:wrap; gap:0 4px; align-items:center; }\n  .wissue{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:6px 10px; font-size:13px; color:var(--danger); }\n  .wbk{ background:#f3efe6; border:1px dashed #bdb6a6; border-radius:10px; padding:6px 10px; margin:4px 0; }\n  .wbk .dtext{ font-size:13px; max-height:40vh; overflow:auto; }\n  .rimgs{ display:flex; flex-wrap:nowrap; align-items:flex-start; gap:8px; margin-top:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px; scrollbar-width:thin; }\n  .rimgadd{ flex:0 0 auto; align-self:center; }\n  .rimgw{ flex:0 0 auto; width:64px; min-width:0; }\n  .rimgb{ position:relative; display:block; width:64px; height:64px; padding:0; border:1px solid #cfc8b6; border-radius:8px; background:#eae4d6; overflow:hidden; }\n  .rimgb .rimgimg{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:block; }\n  .rimgph{ display:flex; align-items:center; justify-content:center; width:100%; height:100%; font-size:11px; color:var(--ink-soft); text-align:center; }\n  .rimgm{ display:block; font-size:10.5px; color:var(--ink-soft); line-height:1.3; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n  .lbox{ display:flex; align-items:center; justify-content:center; min-height:120px; background:#1c1b19; border-radius:10px; padding:4px; }\n  .lbox .lbimg{ display:block; max-width:100%; max-height:60vh; width:auto; height:auto; object-fit:contain; }\n  .lbox .rimgph{ color:#ddd; min-height:120px; }\n  .pplb{ border:none; background:none; padding:0 4px 0 0; margin:0; min-height:36px; color:inherit; font:inherit; text-align:left; border-radius:18px; cursor:pointer; }\n  .pplb:active{ background:rgba(31,122,99,.12); }\n  .gacts{ display:inline-flex; align-items:center; margin-left:auto; }\n  .tb-read{ font-weight:700; }\n\n  /* 通し読み：本文だけを順番につなげて表示（概要・シーン設計・資料・参考画像は出さない） */\n  .rd-bar{ position:sticky; top:var(--pvtop,0px); z-index:20; display:flex; align-items:center; gap:8px; background:#eef6f1; border-bottom:1px solid #cfe4d8; margin:0 -10px 6px; padding:6px 10px; }\n  .rd-title{ font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-size:18px; font-weight:700; flex:1 1 auto; min-width:0; }\n  .rd-scope{ font-size:12px; color:var(--ink-soft); margin:2px 0 10px; display:flex; flex-wrap:wrap; align-items:center; gap:2px 8px; }\n  .rd-h{ font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-weight:700; color:#2f5a49; margin:18px 0 6px; padding-bottom:3px; border-bottom:1px solid #cfe4d8; overflow-wrap:anywhere; }\n  .rd-h0{ font-size:20px; } .rd-h1{ font-size:18px; } .rd-h2{ font-size:16px; } .rd-h3{ font-size:15px; }\n  .rd-ev{ margin:10px 0 14px; }\n  .rd-cap{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink-soft); }\n  .rd-cap .rd-ed{ margin-left:auto; }\n  .rd-sh{ border:1px solid #cfe4d8; background:#fff; border-radius:8px; padding:0 6px; font-size:10.5px; }\n  .rd-text{ white-space:pre-wrap; overflow-wrap:anywhere; font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-size:16px; line-height:1.95; margin-top:2px; }\n  .rd-empty{ display:flex; align-items:center; gap:8px; color:var(--ink-soft); font-size:13px; background:rgba(0,0,0,.035); border-radius:8px; padding:2px 8px; }\n  .rd-empty span{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }\n  .rd-warn{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:6px 10px; }\n  .rd-warn .rd-state{ color:var(--danger); font-size:13px; }\n  .mode-read .toolbar,.mode-read .notice,.mode-read > .wrap > h1{ display:none; }\n\n  /* ===== 配色と操作の見分け（読む情報＝墨色／項目名・補足＝グレー／押せる操作＝紫＋下線） ===== */\n  .pv{ --ink:#29332F; --ink-soft:#64716B; --act:#69518C; --line-gg:#DCE5E0; }\n  .lnk{ color:var(--act); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:3px; }\n  .lnk:active{ background:rgba(105,81,140,.12); }\n  .tri{ color:var(--act); text-decoration:none; }\n  .tgl{ font-weight:700; }\n  .inl::placeholder{ color:#6F7B75; opacity:1; font-weight:400; }\n  .inl.s{ color:var(--ink); font-size:13px; }\n  .inl.lb{ color:var(--ink-soft); }\n  .lvl,.cnt,.rlab,.none-txt,.stcont{ color:var(--ink-soft); }\n  .sech{ font-size:12px; color:var(--ink-soft); }\n  .sf .sl,.wmeta,.rimgm,.rd-cap,.hint{ font-size:12px; color:var(--ink-soft); }\n  .rimgm{ font-size:11.5px; }\n  .scsum{ color:var(--ink); font-size:13px; }\n  .scsum b{ color:var(--ink-soft); }\n  .scnote{ color:var(--ink-soft); text-decoration:none; }\n  /* 直接編集の目印（鉛筆）。入力枠は常時出さない */\n  .edw{ position:relative; display:block; }\n  .edw .inl{ padding-right:20px; }\n  .pen{ position:absolute; right:2px; top:5px; font-size:12px; line-height:1; color:var(--ink-soft); pointer-events:none; }\n  .edw:focus-within .pen{ color:var(--act); }\n  /* 背景：まとまり＝淡いミント、出来事＝緑み白、文章プレビュー＝白 */\n  .v-card .event{ background:#EEE7F5; border:1px solid var(--line-gg); }\n  .wprev{ background:#FFFFFF; border:1px solid var(--line-gg); color:var(--ink); }\n  .wtxt{ color:var(--ink); }\n  .wed,.wempty{ color:var(--act); font-weight:700; font-size:12.5px; text-decoration:underline; text-underline-offset:3px; }\n  .wempty{ font-size:14px; }\n  /* 資料：キャラ（アイコン＋名前で1つの操作）は紫＋下線、場所・参考資料の名前は通常の墨色 */\n  .ppl.pplb .pname{ color:var(--act); text-decoration:underline; text-underline-offset:3px; font-weight:600; }\n  .ppl .pname{ color:var(--ink); }\n  .pplb:active{ background:rgba(105,81,140,.12); }\n  .rimgb::after{ content:'⤢'; position:absolute; right:2px; bottom:2px; width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,.92); border:1px solid var(--line-gg); color:var(--act); font-size:12px; font-weight:700; line-height:16px; text-align:center; pointer-events:none; }\n  .rimgb{ border-color:var(--line-gg); }\n";
+const PLOTV2_CSS = "\n  :host{ display:block; } .pv{ --ink:#2b2a27; --ink-soft:#6b665c; --teal:#1f7a63; --teal-soft:#a8d5c3; --purple:#6b4fa0; --danger:#8a3a3a; }\n  *{ box-sizing:border-box; }\n    [hidden]{ display:none !important; }\n  .pv{ background:var(--bg); color:var(--ink); font-family:\"Zen Kaku Gothic New\",\"Hiragino Sans\",\"Yu Gothic\",sans-serif; font-size:14px; line-height:1.5; border-radius:12px; overflow-x:clip; }\n  .pv.v-card{ --bg:#f6faf7; --gap:6px; }\n  button{ font:inherit; color:inherit; cursor:pointer; }\n  input,textarea,select{ color:var(--ink); }\n  .wrap{ max-width:820px; margin:0 auto; padding:12px 10px 80px; }\n  .pv h1{ font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-size:20px; margin:2px 0 6px; }\n  .notice{ background:#fff3d6; border:1px solid #e2c985; border-radius:8px; padding:6px 10px; font-size:12px; margin-bottom:8px; }\n  .btn{ border:1px solid #bdb6a6; background:#fff; border-radius:14px; padding:5px 12px; font-size:13px; min-height:34px; }\n  .btn:active{ background:#eee8d8; }\n  .btn.primary{ background:#3b3f5c; color:#fff; border-color:#3b3f5c; }\n  .btn.danger{ color:var(--danger); border-color:#dbb; }\n  .btn:disabled{ opacity:.35; cursor:default; }\n  .toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:6px 0 10px; }\n\n  /* 文字リンク風の操作（枠・塗りなし。小さく見えてもタップ領域は高さ36〜40px） */\n  .lnk{ border:none; background:none; color:var(--teal); font-size:13px; font-weight:600; padding:0 6px; min-height:40px; display:inline-flex; align-items:center; gap:2px; border-radius:8px; white-space:nowrap; }\n  .lnk:active{ background:rgba(31,122,99,.12); }\n  .lnk.sm{ min-height:36px; font-size:12px; }\n  .lnk[aria-pressed=\"true\"]{ text-decoration:underline; text-underline-offset:4px; }\n\n  /* 共通の骨格（色・枠・線は下の表示別ルールで切り替える） */\n  .card{ min-width:0; }\n  .tog{ flex:0 0 auto; width:32px; height:32px; border:none; background:transparent; color:#55705f; font-size:13px; padding:0; line-height:1; border-radius:8px; }\n  .tog:active{ background:rgba(0,0,0,.07); }\n  .ghead,.ehead{ display:flex; align-items:flex-start; gap:6px; position:relative; }\n  .gleft{ flex:0 0 auto; display:flex; align-items:center; gap:2px; max-width:40%; }\n    .gright, .emain{ flex:1 1 auto; min-width:0; padding:3px 0 0; }\n    .gact{ flex:0 0 auto; }\n  .ttl{ font-weight:700; font-size:16px; line-height:1.4; overflow-wrap:anywhere; word-break:normal; }\n  .sum{ font-size:12px; color:var(--ink-soft); overflow-wrap:anywhere; margin-top:1px; }\n  .cnt{ font-size:11px; color:var(--ink-soft); font-weight:400; margin-left:6px; white-space:nowrap; }\n  .gbody{ margin-top:var(--gap); }\n  .list-stack > * + *{ margin-top:var(--gap); }\n  .emptyg{ font-size:12px; color:var(--ink-soft); padding:2px 8px; }\n\n  /* 展開した出来事の中身：概要・キャラ・場所は囲み箱にせず、文字と丸い画像で並べる */\n  .edetail{ margin-top:2px; padding-left:38px; }\n  .dtext{ white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; }\n  .dtext.none{ color:var(--ink-soft); }\n  .rline{ display:flex; flex-wrap:wrap; align-items:center; gap:2px 12px; margin-top:4px; }\n  .ppl{ display:inline-flex; align-items:center; gap:6px; font-size:13px; min-width:0; }\n  .av{ width:28px; height:28px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:15px; color:#fff; flex:0 0 auto; line-height:1; }\n  .av.place{ background:#dfe8e2; color:#3f5a4d; }\n  .pname{ overflow-wrap:anywhere; }\n  .none-txt{ font-size:12px; color:var(--ink-soft); }\n  .scsum{ margin-top:6px; font-size:12px; border-left:2px solid var(--teal-soft); padding-left:8px; color:#4a463d; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }\n  .scsum b{ font-weight:700; color:var(--ink-soft); margin-right:4px; }\n\n  /* 構成：帯（細い色）とラベルだけに色を使う */\n  .event.st{ --stc:#999; }\n  .event.st::before{ content:''; position:absolute; width:4px; background:var(--stc); }\n  .strow{ display:flex; align-items:center; gap:6px; margin-bottom:2px; }\n  .stl{ border:none; color:#fff; border-radius:10px; padding:2px 12px; font-size:12px; font-weight:700; min-height:28px; }\n  .stcont{ font-size:11px; color:var(--ink-soft); }\n  .strbar{ display:flex; flex-wrap:wrap; gap:0 8px; align-items:center; padding:0 4px; }\n  .stchip{ border:none; border-bottom:2px solid var(--stc,#bdb6a6); background:transparent; padding:0 4px; font-size:12px; min-height:34px; }\n  .stchip.warn{ border-bottom-color:var(--danger); color:var(--danger); font-weight:700; }\n  .stunset{ display:inline-flex; align-items:center; gap:0; font-size:12px; color:var(--ink-soft); }\n\n  /* ===== B：淡いカード ===== */\n  .v-card .card{ border:1px solid transparent; }\n  .v-card .group{ background:#e6f3ec; border-radius:18px; padding:6px 10px 10px; }\n  .v-card .gbody .group{ background:#fafdfb; border-radius:14px; padding:4px 8px 8px; }\n  .v-card .gbody .group.even{ background:#e6f3ec; }\n  .v-card .gbody .group.deep2{ padding:3px 5px 6px; }\n  .v-card .event{ position:relative; background:#fdf5e1; border-radius:12px; padding:4px 10px 8px; }\n  .v-card .event.st::before{ left:0; top:8px; bottom:8px; border-radius:0 3px 3px 0; }\n  .v-card .endcap{ background:#e6e9ec; border-radius:12px; padding:8px 14px; font-weight:600; font-size:14px; color:#4a5560; letter-spacing:.12em; }\n  .v-card .trunk > .list-stack{ margin:10px 0; }\n  .v-card .addbtn{ padding:0 6px; }\n\n  /* ===== C：縦の流れ（左の細い線＝読者に見せる順番と所属。構成の帯は右端） ===== */\n\n  .addbtn{ display:inline-flex; }\n  .addrow{ display:flex; align-items:center; justify-content:space-between; }\n  .erow{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; margin-top:2px; }\n\n  /* 直接編集：普段は文章に見せ、フォーカス中だけ薄い背景と枠で編集箇所を示す */\n  .inl{ display:block; width:calc(100% + 8px); margin:0 -4px; padding:2px 4px; font:inherit; color:inherit; background:transparent; border:none; border-radius:6px; outline:none; resize:none; overflow:hidden; box-shadow:0 0 0 1.5px transparent; cursor:text; }\n  .inl::placeholder{ color:#aaa597; font-weight:400; }\n  .inl:focus{ background:rgba(31,122,99,.07); box-shadow:0 0 0 1.5px var(--teal-soft); }\n  .inl.t{ font-size:16px; font-weight:700; line-height:1.4; text-overflow:ellipsis; }\n  .inl.s{ font-size:12px; color:var(--ink-soft); line-height:1.5; }\n  .inl.d{ font-size:14px; line-height:1.5; }\n  .inl.lb{ width:4.2em; max-width:100%; margin:0; font-size:13px; font-weight:700; color:#3f6a55; min-height:32px; line-height:1.4; }\n  .trow{ display:flex; align-items:center; gap:4px; }\n  .trow .inl{ width:auto; flex:1 1 auto; min-width:0; margin:0 0 0 -4px; }\n  .scene{ margin-top:6px; padding-left:8px; border-left:2px solid var(--teal-soft); }\n  .sf + .sf{ margin-top:4px; }\n  .sf .sl{ font-size:11px; color:var(--ink-soft); }\n\n  /* ===== 移動モード ===== */\n  .mode-move .toolbar,.mode-move .notice,.mode-move h1{ display:none; }\n  .movebar{ position:sticky; top:var(--pvtop,0px); z-index:20; background:#f1ebfb; border-bottom:1px solid #dccff2; margin:0 -10px 6px; padding:6px 10px 6px; }\n  .mb1{ display:flex; align-items:center; justify-content:space-between; gap:6px; }\n  .mbl{ display:flex; align-items:center; gap:6px; min-width:0; }\n  .mbt{ font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-size:19px; font-weight:700; line-height:1.3; white-space:nowrap; }\n  .mbadge{ flex:0 1 auto; background:#7b5cc4; color:#fff; border-radius:999px; padding:1px 10px; font-size:11px; font-weight:700; white-space:nowrap; }\n  .mbr{ display:flex; align-items:center; gap:2px; flex:0 0 auto; }\n  .movebar .lnk{ color:#6b4fa0; min-height:36px; }\n  .btn.done{ background:#6b4fa0; border-color:#6b4fa0; color:#fff; font-weight:700; padding:0 14px; min-height:36px; white-space:nowrap; }\n  .mb2{ display:flex; align-items:center; gap:8px; min-height:24px; }\n  .mbh{ flex:1 1 auto; min-width:0; font-size:12.5px; color:#4a3b73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }\n  #mbpath{ flex:0 1 auto; min-width:0; max-width:46%; }\n  .pathpill{ display:block; background:#e4daf7; border-radius:10px; padding:1px 10px; font-size:11.5px; color:#4a3b73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }\n  .mbwarn{ font-size:12px; color:var(--danger); margin-top:4px; }\n  .mbwarn:empty{ display:none; }\n  .lnk:disabled{ opacity:.35; cursor:default; }\n  .mvtap{ cursor:pointer; }\n  .tgsp{ flex:0 0 auto; width:6px; }\n  .lbl{ display:flex; align-items:center; font-weight:700; font-size:13px; color:#3f6a55; min-height:32px; padding:0 2px; overflow-wrap:anywhere; min-width:0; }\n  .ttl.empty{ color:var(--ink-soft); font-weight:400; }\n  .mv .ttl{ font-size:15px; }\n  .sum.clamp{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }\n  .mode-move .event.mv{ padding-bottom:4px; }\n  .card.sel{ background:#ece4fa !important; box-shadow:inset 3px 0 0 #7b5cc4; }\n  .ghead.sel{ background:#ece4fa; box-shadow:inset 3px 0 0 #7b5cc4; border-radius:10px; padding:0 6px; }\n  .mvact{ display:flex; gap:8px; padding:6px 0 4px 8px; }\n  .mvact .btn{ flex:1 1 0; min-width:0; max-width:130px; padding:0 6px; white-space:nowrap; }\n  .mode-move .list-stack.nest::before{ bottom:14px; }\n  .dest .dpath{ display:block; font-size:11px; color:var(--ink-soft); }\n  .dest .dt{ font-weight:700; }\n  .dest .dnote{ display:block; font-size:11px; color:var(--danger); }\n\n  /* モーダル・メニュー */\n  .overlay{ position:fixed; inset:0; background:rgba(30,28,25,.45); z-index:50; display:flex; align-items:flex-end; justify-content:center; }\n  .modal{ background:#fffdf8; width:100%; max-width:560px; max-height:90vh; overflow-y:auto; overscroll-behavior:contain; border-radius:16px 16px 0 0; padding:14px; }\n  @media (min-width:700px){ .overlay{ align-items:center; } .modal{ border-radius:16px; } }\n  .modal h2{ font-size:16px; margin:0 0 6px; }\n  .where{ font-size:12px; background:#eef6e8; border:1px solid #b7d3a5; border-radius:8px; padding:4px 8px; margin-bottom:6px; overflow-wrap:anywhere; }\n  .where.warn{ background:#fbeeee; border-color:#dbb; color:var(--danger); }\n  .field{ margin:8px 0; }\n  .field label{ display:block; font-size:12px; color:var(--ink-soft); margin-bottom:2px; }\n  .field input,.field textarea,.field select{ width:100%; font:inherit; font-size:16px; border:1px solid #bdb6a6; border-radius:8px; padding:8px; background:#fff; }\n  .field textarea{ min-height:120px; resize:vertical; }\n  .field textarea.sm{ min-height:72px; }\n  .err{ color:var(--danger); font-size:12px; }\n  .kindsel{ display:flex; gap:8px; margin:6px 0; }\n  .kindsel button{ flex:1; border:1.5px solid #bdb6a6; background:#fff; border-radius:10px; padding:8px; }\n  .kindsel button.on{ border-color:var(--purple); background:#efe9fa; font-weight:700; }\n  .opsec{ margin-top:12px; padding-top:8px; border-top:1px solid #e0d9c6; }\n  .ops{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }\n  .foot{ display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; margin-top:10px; }\n  .dest{ display:block; width:100%; text-align:left; border:1px solid #bdb6a6; background:#fff; border-radius:8px; padding:8px 10px; margin:4px 0; overflow-wrap:anywhere; }\n  .dest[disabled]{ opacity:.4; background:#eee; }\n  .hint{ font-size:12px; color:var(--ink-soft); }\n  .pos{ display:flex; gap:12px; margin:6px 0; font-size:14px; }\n  .pick{ display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:1px solid #bdb6a6; background:#fff; border-radius:10px; padding:6px 10px; margin:4px 0; }\n  .pick.on{ border-color:var(--purple); background:#efe9fa; }\n  .pick .ck{ margin-left:auto; font-weight:700; color:var(--purple); }\n  .toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:rgba(30,28,25,.9); color:#fff; padding:8px 14px; border-radius:999px; font-size:13px; z-index:80; max-width:90vw; }\n\n  /* ===== 本体統合で追加 ===== */\n  .tbsp{ margin-left:auto; }\n  .chkpanel{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:8px 10px; margin:0 0 10px; font-size:13px; }\n  .chkpanel h2{ font-size:14px; margin:0 0 4px; color:var(--danger); }\n  .chkrow{ padding:6px 0; border-top:1px dashed #dbb; }\n  .chkrow:first-of-type{ border-top:none; }\n  .chkrow .why{ color:var(--danger); font-size:12px; }\n  .chkrow .ops{ margin-top:2px; }\n  .errbox{ background:#fbeeee; border:1px solid #d9a3a3; border-radius:10px; padding:10px 12px; color:var(--danger); margin:8px 0; }\n  .errbox textarea{ width:100%; min-height:140px; font-size:12px; margin-top:6px; }\n  .rolerow{ border:1px solid #d8d1c0; border-radius:10px; padding:6px 8px; margin:6px 0; background:#fff; }\n  .rolerow .rr1{ display:flex; gap:6px; align-items:center; }\n  .rolerow input[type=text]{ flex:1 1 auto; min-width:0; font:inherit; font-size:16px; border:1px solid #bdb6a6; border-radius:8px; padding:4px 8px; }\n  .rolerow input[type=color]{ width:40px; height:34px; padding:0; border:1px solid #bdb6a6; border-radius:8px; background:#fff; }\n  .rolerow .rr2{ font-size:12px; margin-top:2px; color:var(--ink-soft); }\n  .rolerow .rr2.warn{ color:var(--danger); font-weight:700; }\n  .emptyall{ background:#fff; border:1px dashed #bdb6a6; border-radius:12px; padding:14px; margin:8px 0; color:var(--ink-soft); text-align:center; }\n  .stwarn{ color:var(--danger); font-size:12px; }\n\n  /* ===== スマホ幅対応・開閉操作・アイコン（新プロットの中だけに適用） ===== */\n  .pv{ --P:12px; --G:9px; --CP:8px; }\n  .ghead,.ehead{ display:block; position:relative; }\n  .grow1{ display:flex; flex-wrap:wrap; align-items:center; gap:0 8px; min-width:0; }\n  .grow1 .inl.lb{ flex:1 1 4.6em; width:auto; min-width:4.2em; max-width:100%; margin:0 0 0 -4px; min-height:32px; }\n  .grow1 .cnt{ margin-left:0; }\n  .grow1 .gacts{ margin-left:auto; }\n  .grow1 .lbl{ flex:1 1 4.6em; min-width:4.2em; overflow-wrap:anywhere; }\n  .lvl{ flex:0 0 auto; font-size:10.5px; color:var(--ink-soft); border:1px solid #cfe4d8; background:#fff; border-radius:8px; padding:0 6px; white-space:nowrap; }\n  .inl.t{ text-overflow:clip; white-space:pre-wrap; overflow-wrap:anywhere; }\n  .inl.s{ overflow-wrap:anywhere; }\n  .tgrow{ display:flex; margin-top:0; }\n  .tgl{ min-height:44px; padding:0 6px; font-weight:600; justify-content:flex-start; gap:4px; }\n  .tri{ display:inline-block; width:1.1em; font-size:12px; text-align:center; }\n  .edetail{ padding-left:2px; }\n  .mv .mvtap{ display:block; padding:4px 0; }\n  .ghead.sel{ padding:0 6px; }\n  .ghead.sel .mvtap{ padding-top:4px; }\n  .mvact{ padding-left:2px; }\n  .kinddesc{ font-size:12px; color:var(--ink-soft); margin:2px 0 8px; }\n  .kinddesc div{ padding:1px 0; }\n  .kinddesc .on{ color:var(--ink); }\n  .kinddesc .on b{ color:var(--purple); }\n  .av{ position:relative; width:28px; height:28px; border-radius:50%; overflow:hidden; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; background:var(--paper-dim,#eae4d6); border:1px solid var(--line,#ddd5c3); color:var(--ink-soft); font-size:12px; line-height:1; }\n  .av.place{ background:#dfe8e2; color:#3f5a4d; }\n  .av.place .avph{ font-size:15px; }\n  .av .avimg{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }\n  .ppl{ align-items:center; max-width:100%; }\n  .pname{ min-width:0; overflow-wrap:anywhere; }\n  .pick .av{ width:36px; height:36px; }\n  .pick .pname{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }\n  .pick .ck{ flex:0 0 auto; }\n\n\n  /* カード表示：入れ子ごとに余白が積み重ならないようにする */\n  .v-card .gbody .group.deep2{ padding:3px 5px 6px; }\n  .v-card .gbody .group.deep4{ padding:3px 2px 5px; }\n\n  @media (max-width:600px){\n    :host{ margin:0 -16px; }\n    .pv{ --P:10px; --G:8px; --CP:6px; border-radius:0; }\n    .wrap{ padding:8px 6px 80px; }\n    .movebar{ margin:0 -8px 6px; padding:6px 8px; }\n    .v-card .group{ padding:6px 6px 8px; border-radius:14px; }\n    .v-card .gbody .group{ padding:4px 4px 6px; border-radius:12px; }\n    .v-card .gbody .group.deep2{ padding:3px 4px 5px; }\n    .v-card .gbody .group.deep4{ padding:3px 2px 4px; }\n    .v-card .event{ padding:4px 8px 4px; border-radius:10px; }\n    .v-card .endcap{ padding:6px 12px; }\n    .modal{ padding:12px; }\n    .rd-bar{ margin:0 -8px 6px; padding:6px 8px; }\n  }\n\n  /* ===== 文章プレビュー・参考画像・通し読み（プロット内の執筆） ===== */\n  .sech{ font-size:11px; color:var(--ink-soft); letter-spacing:.06em; margin:12px 0 2px; }\n  .sech:first-child{ margin-top:4px; }\n  .wsub{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0 6px; }\n  .wsub .wmeta{ flex:1 1 auto; min-width:0; margin:0; }\n  .rlab{ font-size:11px; color:var(--ink-soft); }\n  .scnote{ font-size:11px; color:var(--ink-soft); font-weight:400; margin-left:2px; }\n  .tgl{ white-space:normal; text-align:left; }\n  .wblock{ margin-top:2px; }\n  .wmeta{ font-size:11.5px; color:var(--ink-soft); margin:0 0 2px; overflow-wrap:anywhere; }\n  .wprev{ display:block; width:100%; text-align:left; border:1px solid transparent; background:rgba(255,255,255,.55); border-radius:10px; padding:6px 8px; min-height:44px; color:inherit; font:inherit; cursor:pointer; }\n  .wprev:active{ background:rgba(31,122,99,.10); }\n  .wprev:focus-visible{ outline:2px solid var(--teal-soft); }\n  .wtxt{ display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.55; }\n  .wed{ display:block; text-align:right; font-size:11px; color:var(--teal); margin-top:1px; }\n  .wempty{ display:block; color:var(--teal); font-weight:600; font-size:14px; padding:4px 0; }\n  .wacts{ display:flex; flex-wrap:wrap; gap:0 4px; align-items:center; }\n  .wissue{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:6px 10px; font-size:13px; color:var(--danger); }\n  .wbk{ background:#f3efe6; border:1px dashed #bdb6a6; border-radius:10px; padding:6px 10px; margin:4px 0; }\n  .wbk .dtext{ font-size:13px; max-height:40vh; overflow:auto; }\n  .rimgs{ display:flex; flex-wrap:nowrap; align-items:flex-start; gap:8px; margin-top:6px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px; scrollbar-width:thin; }\n  .rimgadd{ flex:0 0 auto; align-self:center; }\n  .rimgw{ flex:0 0 auto; width:64px; min-width:0; }\n  .rimgb{ position:relative; display:block; width:64px; height:64px; padding:0; border:1px solid #cfc8b6; border-radius:8px; background:#eae4d6; overflow:hidden; }\n  .rimgb .rimgimg{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:block; }\n  .rimgph{ display:flex; align-items:center; justify-content:center; width:100%; height:100%; font-size:11px; color:var(--ink-soft); text-align:center; }\n  .rimgm{ display:block; font-size:10.5px; color:var(--ink-soft); line-height:1.3; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n  .lbox{ display:flex; align-items:center; justify-content:center; min-height:120px; background:#1c1b19; border-radius:10px; padding:4px; }\n  .lbox .lbimg{ display:block; max-width:100%; max-height:60vh; width:auto; height:auto; object-fit:contain; }\n  .lbox .rimgph{ color:#ddd; min-height:120px; }\n  .pplb{ border:none; background:none; padding:0 4px 0 0; margin:0; min-height:36px; color:inherit; font:inherit; text-align:left; border-radius:18px; cursor:pointer; }\n  .pplb:active{ background:rgba(31,122,99,.12); }\n  .gacts{ display:inline-flex; align-items:center; margin-left:auto; }\n  .tb-read{ font-weight:700; }\n\n  /* 通し読み：本文だけを順番につなげて表示（概要・シーン設計・資料・参考画像は出さない） */\n  .rd-bar{ position:sticky; top:var(--pvtop,0px); z-index:20; display:flex; align-items:center; gap:8px; background:#eef6f1; border-bottom:1px solid #cfe4d8; margin:0 -10px 6px; padding:6px 10px; }\n  .rd-title{ font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-size:18px; font-weight:700; flex:1 1 auto; min-width:0; }\n  .rd-scope{ font-size:12px; color:var(--ink-soft); margin:2px 0 10px; display:flex; flex-wrap:wrap; align-items:center; gap:2px 8px; }\n  .rd-h{ font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-weight:700; color:#2f5a49; margin:18px 0 6px; padding-bottom:3px; border-bottom:1px solid #cfe4d8; overflow-wrap:anywhere; }\n  .rd-h0{ font-size:20px; } .rd-h1{ font-size:18px; } .rd-h2{ font-size:16px; } .rd-h3{ font-size:15px; }\n  .rd-ev{ margin:10px 0 14px; }\n  .rd-cap{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink-soft); }\n  .rd-cap .rd-ed{ margin-left:auto; }\n  .rd-sh{ border:1px solid #cfe4d8; background:#fff; border-radius:8px; padding:0 6px; font-size:10.5px; }\n  .rd-text{ white-space:pre-wrap; overflow-wrap:anywhere; font-family:\"Hiragino Mincho ProN\",\"Yu Mincho\",serif; font-size:16px; line-height:1.95; margin-top:2px; }\n  .rd-empty{ display:flex; align-items:center; gap:8px; color:var(--ink-soft); font-size:13px; background:rgba(0,0,0,.035); border-radius:8px; padding:2px 8px; }\n  .rd-empty span{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }\n  .rd-warn{ background:#fbeeee; border:1px solid #dbb; border-radius:10px; padding:6px 10px; }\n  .rd-warn .rd-state{ color:var(--danger); font-size:13px; }\n  .mode-read .toolbar,.mode-read .notice,.mode-read > .wrap > h1{ display:none; }\n\n  /* ===== 配色と操作の見分け（読む情報＝墨色／項目名・補足＝グレー／押せる操作＝紫＋下線） ===== */\n  .pv{ --ink:#29332F; --ink-soft:#64716B; --act:#69518C; --line-gg:#DCE5E0; }\n  .lnk{ color:var(--act); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:3px; }\n  .lnk:active{ background:rgba(105,81,140,.12); }\n  .tri{ color:var(--act); text-decoration:none; }\n  .tgl{ font-weight:700; }\n  .inl::placeholder{ color:#6F7B75; opacity:1; font-weight:400; }\n  .inl.s{ color:var(--ink); font-size:13px; }\n  .inl.lb{ color:var(--ink-soft); }\n  .lvl,.cnt,.rlab,.none-txt,.stcont{ color:var(--ink-soft); }\n  .sech{ font-size:12px; color:var(--ink-soft); }\n  .sf .sl,.wmeta,.rimgm,.rd-cap,.hint{ font-size:12px; color:var(--ink-soft); }\n  .rimgm{ font-size:11.5px; }\n  .scsum{ color:var(--ink); font-size:13px; }\n  .scsum b{ color:var(--ink-soft); }\n  .scnote{ color:var(--ink-soft); text-decoration:none; }\n  /* 直接編集の目印（鉛筆）。入力枠は常時出さない */\n  .edw{ position:relative; display:block; }\n  .edw .inl{ padding-right:20px; }\n  .pen{ position:absolute; right:2px; top:5px; font-size:12px; line-height:1; color:var(--ink-soft); pointer-events:none; }\n  .edw:focus-within .pen{ color:var(--act); }\n  /* 背景：まとまり＝淡いミント、出来事＝緑み白、文章プレビュー＝白 */\n  .v-card .event{ background:#EEE7F5; border:1px solid var(--line-gg); }\n  .wprev{ background:#FFFFFF; border:1px solid var(--line-gg); color:var(--ink); }\n  .wtxt{ color:var(--ink); }\n  .wed,.wempty{ color:var(--act); font-weight:700; font-size:12.5px; text-decoration:underline; text-underline-offset:3px; }\n  .wempty{ font-size:14px; }\n  /* 資料：キャラ（アイコン＋名前で1つの操作）は紫＋下線、場所・参考資料の名前は通常の墨色 */\n  .ppl.pplb .pname{ color:var(--act); text-decoration:underline; text-underline-offset:3px; font-weight:600; }\n  .ppl .pname{ color:var(--ink); }\n  .pplb:active{ background:rgba(105,81,140,.12); }\n  .rimgb::after{ content:'⤢'; position:absolute; right:2px; bottom:2px; width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,.92); border:1px solid var(--line-gg); color:var(--act); font-size:12px; font-weight:700; line-height:16px; text-align:center; pointer-events:none; }\n  .rimgb{ border-color:var(--line-gg); }\n\n/* 作品内検索から開いた対象の一時的な強調 */\n.pv .card.pv-hit{ outline:3px solid #e8a317; outline-offset:2px; box-shadow:0 0 0 6px rgba(232,163,23,.25); transition:outline-color .3s, box-shadow .3s; }\n";
 
 /* ============ 新プロット：画面（最新試作の表示・操作を基準にする） ============
    ・表示は試作と同じ見た目・操作を保つため、Shadow DOM（本体CSSと干渉しない）の中に描画する。
@@ -10852,6 +10998,7 @@ function createPlotV2View(host, api){
   let dmap = new Map(), dsig = ''; // 下書き（文章の正本は本体の data.drafts。ここは表示用に参照するだけで、文章は持たない・書き換えない）
   let writerOpen = false, lastLaunchVS = null, pendingImgEvent = null;
   let reader = { scope:null }, readBack = null;
+  let hitId = null, hitTimer = null; // 検索から開いた対象の一時強調
   const bk = new Set(); // 「退避した元の文章」を開いている出来事（一時状態）
   const imgCache = new Map(), imgPending = new Set(); // キャラアイコン：画像IDごとの表示用URL（プロットには画像データを保存しない。既存の画像保存から都度取得）
 
@@ -11297,7 +11444,15 @@ function createPlotV2View(host, api){
       `<div id="view"><div class="trunk"><div class="card endcap">開始</div>${move ? renderMoveList(model.items, null, 0) : renderList(model.items, null, 0)}<div class="card endcap">終了</div></div></div>`;
     if(!move) growAll();
     paintIcons();
+    applyHit();
     window.scrollTo(0, y);
+  }
+  /* ---------- 作品内検索から開いた時の一時的な強調（保存しない・通常画面だけ） ---------- */
+  function hitEl(id){ return Array.prototype.find.call(root.querySelectorAll('[data-node]'), e => e.getAttribute('data-node') === id) || null; }
+  function applyHit(){
+    if(!hitId) return;
+    const el = hitEl(hitId);
+    if(el) el.classList.add('pv-hit');
   }
   function autoGrow(el){ el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
   function growAll(){ root.querySelectorAll('#view textarea.ag').forEach(autoGrow); }
@@ -11708,6 +11863,35 @@ function createPlotV2View(host, api){
       writerOpen = v;
       if(!v && model && !errState && !destroyed){ render(); restoreViewState(lastLaunchVS); }
     },
+    // 作品内検索から開く：対象と祖先を展開し、画面中央へスクロールして一時的に強調する。
+    // 通し読み・移動モードには入らない。作品データは書き換えない（端末内の開閉設定だけ、対象と祖先を開く分だけ変える）。
+    focusNode(id, openScene){
+      if(!model || errState || destroyed) return false;
+      const info = find(id);
+      if(!info) return false;
+      if(mode !== 'normal'){ mode = 'normal'; mv = { sel:null, col:{} }; readBack = null; }
+      let p = info.parent;
+      while(p){ ui.col[p.id] = false; const pi = find(p.id); p = pi ? pi.parent : null; }
+      if(info.node.kind === 'group') ui.col[id] = false;
+      else { ui.ev[id] = true; if(openScene) ui.sc[id] = true; }
+      saveUi();
+      clearTimeout(hitTimer);
+      hitId = id;
+      render();
+      const go = () => {
+        if(destroyed) return;
+        const el = hitEl(id);
+        if(el && el.scrollIntoView) el.scrollIntoView({ block:'center' });
+      };
+      go();
+      requestAnimationFrame(go);
+      hitTimer = setTimeout(() => {
+        const el = hitEl(id);
+        if(el) el.classList.remove('pv-hit');
+        if(hitId === id) hitId = null;
+      }, 3000);
+      return true;
+    },
     // キャラ資料などから戻ってきた時：プロット（または通し読み）の元の位置・状態へ戻す。開閉状態は端末内のUI設定から復元済み
     restoreState(vs){
       if(!vs || !model || errState) return;
@@ -11718,6 +11902,7 @@ function createPlotV2View(host, api){
     },
     destroy(){
       destroyed = true;
+      clearTimeout(hitTimer);
       commit();
       window.removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onHide);
@@ -12084,7 +12269,7 @@ function PlotDraftWriter({ data, setData, writer, onClose, onOpenChar, saveState
 }
 const SCENE_FIELD_LABELS = [['goal','目的'],['obstacle','対立・障害'],['change','場面で起きる変化'],['memo','自由メモ']];
 
-function PlotV2({ data, setData, markDirty, writerOpen, onOpenWriter, onOpenChar, restoreState, onRestored }){
+function PlotV2({ data, setData, markDirty, writerOpen, onOpenWriter, onOpenChar, restoreState, onRestored, focusRequest, onFocusHandled }){
   const hostRef = useRef(null), ctlRef = useRef(null);
   const apiRef = useRef({});
   apiRef.current = {
@@ -12112,6 +12297,12 @@ function PlotV2({ data, setData, markDirty, writerOpen, onOpenWriter, onOpenChar
   useEffect(()=>{
     if(ctlRef.current) ctlRef.current.setWriterOpen(!!writerOpen);
   }, [!!writerOpen]);
+  // 作品内検索から開いた時：対象まで展開してスクロール・強調（上の同期の後に実行される）
+  useEffect(()=>{
+    if(!focusRequest || !ctlRef.current) return;
+    ctlRef.current.focusNode(focusRequest.id, !!focusRequest.openScene);
+    if(onFocusHandled) onFocusHandled(focusRequest.nonce);
+  }, [focusRequest && focusRequest.nonce]);
   return <div ref={hostRef} />;
 }
 
@@ -12411,6 +12602,27 @@ function App(){
   };
   const isCharFromPlot = () => !!(plotReturnRef.current && screen==='characters' && detailId && plotReturnRef.current.charId===detailId);
 
+  // 作品内検索の結果を開く：上部の検索状態を解除して対象画面を表示する（作品データは書き換えない）。
+  // 開く前に入力中の内容を端末内へ保存しておく。文章・章・場面は「書く」「まとめる」へ、プロットはプロット画面へ依頼を渡す。
+  const [searchOpenReq, setSearchOpenReq] = useState(null); // 「書く」「まとめる」へ渡す依頼 { kind:'draft'|'chapter', ..., nonce }
+  const [plotFocusReq, setPlotFocusReq] = useState(null); // プロットへ渡す依頼 { id, openScene, nonce }
+  const openSearchResult = (req) => {
+    if(!req) return;
+    saveNow();
+    plotReturnRef.current = null;
+    navOriginRef.current = null;
+    setQuery('');
+    setWriter(null);
+    const nonce = Date.now() + Math.random();
+    if(req.kind==='plot'){
+      setPlotFocusReq({ id:req.nodeId, openScene:!!req.openScene, nonce });
+      setScreen('plot'); setDetailId(null);
+    } else if(req.kind==='draft' || req.kind==='chapter'){
+      setSearchOpenReq({ ...req, nonce });
+      setScreen('writing'); setDetailId(null);
+    }
+  };
+
   const navigateTo = (target, id) => {
     plotReturnRef.current = null;
     navOriginRef.current = null;
@@ -12533,7 +12745,7 @@ function App(){
 
   let body;
   if(query.trim()){
-    body = <SearchResults data={data} query={query} navigateTo={navigateTo} />;
+    body = <SearchResults data={data} query={query} navigateTo={navigateTo} openResult={openSearchResult} />;
   } else if(screen==='dashboard'){
     body = <Dashboard data={data} setScreen={setScreen} />;
   } else if(screen==='characters'){
@@ -12582,13 +12794,14 @@ function App(){
     body = <SettingsHub data={data} navigateTo={navigateTo} />;
   } else if(screen==='plot'){
     body = <PlotV2 data={data} setData={setData} markDirty={()=>setSaveState('saving')} writerOpen={!!writer} onOpenWriter={openWriter}
-      onOpenChar={(req)=>openCharFromPlot(req.charId, req.viewState, null)} restoreState={plotRestoreRef.current} onRestored={()=>{ plotRestoreRef.current = null; }} />;
+      onOpenChar={(req)=>openCharFromPlot(req.charId, req.viewState, null)} restoreState={plotRestoreRef.current} onRestored={()=>{ plotRestoreRef.current = null; }}
+      focusRequest={plotFocusReq} onFocusHandled={(n)=>setPlotFocusReq(r=>(r && r.nonce===n) ? null : r)} />;
   } else if(screen==='plotOld'){
     body = <Plot data={data} setData={setData} allChars={allChars} allLocations={allLocations} />;
   } else if(screen==='storyTools'){
     body = <StoryToolsScreen data={data} setData={setData} outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} openSceneSignal={sceneToolsSignal} />;
   } else if(screen==='writing'){
-    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} onOpenAdultTools={openAdultTools} onOpenSceneFlowScreen={openSceneFlowScreen} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} openId={writingOpenId} setOpenId={setWritingOpenId} activeBlockId={writingBlockId} setActiveBlockId={setWritingBlockId} backRef={writingBackRef} />;
+    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} onOpenAdultTools={openAdultTools} onOpenSceneFlowScreen={openSceneFlowScreen} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} searchOpen={searchOpenReq} onSearchOpenHandled={(n)=>setSearchOpenReq(r=>(r && r.nonce===n) ? null : r)} openId={writingOpenId} setOpenId={setWritingOpenId} activeBlockId={writingBlockId} setActiveBlockId={setWritingBlockId} backRef={writingBackRef} />;
   } else if(screen==='aiimport'){
     body = <AiImportScreen data={data} setData={setData} lastImportBackup={lastImportBackup} setLastImportBackup={setLastImportBackup} />;
   } else if(screen==='adultTools'){
