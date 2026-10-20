@@ -294,6 +294,27 @@ function App(){
   };
   const isCharFromPlot = () => !!(plotReturnRef.current && screen==='characters' && detailId && plotReturnRef.current.charId===detailId);
 
+  // 作品内検索の結果を開く：上部の検索状態を解除して対象画面を表示する（作品データは書き換えない）。
+  // 開く前に入力中の内容を端末内へ保存しておく。文章・章・場面は「書く」「まとめる」へ、プロットはプロット画面へ依頼を渡す。
+  const [searchOpenReq, setSearchOpenReq] = useState(null); // 「書く」「まとめる」へ渡す依頼 { kind:'draft'|'chapter', ..., nonce }
+  const [plotFocusReq, setPlotFocusReq] = useState(null); // プロットへ渡す依頼 { id, openScene, nonce }
+  const openSearchResult = (req) => {
+    if(!req) return;
+    saveNow();
+    plotReturnRef.current = null;
+    navOriginRef.current = null;
+    setQuery('');
+    setWriter(null);
+    const nonce = Date.now() + Math.random();
+    if(req.kind==='plot'){
+      setPlotFocusReq({ id:req.nodeId, openScene:!!req.openScene, nonce });
+      setScreen('plot'); setDetailId(null);
+    } else if(req.kind==='draft' || req.kind==='chapter'){
+      setSearchOpenReq({ ...req, nonce });
+      setScreen('writing'); setDetailId(null);
+    }
+  };
+
   const navigateTo = (target, id) => {
     plotReturnRef.current = null;
     navOriginRef.current = null;
@@ -416,7 +437,7 @@ function App(){
 
   let body;
   if(query.trim()){
-    body = <SearchResults data={data} query={query} navigateTo={navigateTo} />;
+    body = <SearchResults data={data} query={query} navigateTo={navigateTo} openResult={openSearchResult} />;
   } else if(screen==='dashboard'){
     body = <Dashboard data={data} setScreen={setScreen} />;
   } else if(screen==='characters'){
@@ -465,13 +486,14 @@ function App(){
     body = <SettingsHub data={data} navigateTo={navigateTo} />;
   } else if(screen==='plot'){
     body = <PlotV2 data={data} setData={setData} markDirty={()=>setSaveState('saving')} writerOpen={!!writer} onOpenWriter={openWriter}
-      onOpenChar={(req)=>openCharFromPlot(req.charId, req.viewState, null)} restoreState={plotRestoreRef.current} onRestored={()=>{ plotRestoreRef.current = null; }} />;
+      onOpenChar={(req)=>openCharFromPlot(req.charId, req.viewState, null)} restoreState={plotRestoreRef.current} onRestored={()=>{ plotRestoreRef.current = null; }}
+      focusRequest={plotFocusReq} onFocusHandled={(n)=>setPlotFocusReq(r=>(r && r.nonce===n) ? null : r)} />;
   } else if(screen==='plotOld'){
     body = <Plot data={data} setData={setData} allChars={allChars} allLocations={allLocations} />;
   } else if(screen==='storyTools'){
     body = <StoryToolsScreen data={data} setData={setData} outlineData={storyOutlines} setOutlineData={setStoryOutlines} sceneData={generalScenes} setSceneData={setGeneralScenes} patternData={storyPatterns} setPatternData={setStoryPatterns} openSceneSignal={sceneToolsSignal} />;
   } else if(screen==='writing'){
-    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} onOpenAdultTools={openAdultTools} onOpenSceneFlowScreen={openSceneFlowScreen} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} openId={writingOpenId} setOpenId={setWritingOpenId} activeBlockId={writingBlockId} setActiveBlockId={setWritingBlockId} backRef={writingBackRef} />;
+    body = <Writing data={data} setData={setData} allChars={allChars} allLocations={allLocations} focusMode={writingFocusMode} setFocusMode={setWritingFocusMode} writingSnippets={writingSnippets} setWritingSnippets={setWritingSnippets} expressionDictionary={expressionDictionary} setExpressionDictionary={setExpressionDictionary} specialDictionary={specialDictionary} setSpecialDictionary={setSpecialDictionary} lastSpecialImportIds={lastSpecialImportIds} setLastSpecialImportIds={setLastSpecialImportIds} mediaDictionary={mediaDictionary} setMediaDictionary={setMediaDictionary} lastMediaImportIds={lastMediaImportIds} setLastMediaImportIds={setLastMediaImportIds} adultDictionary={adultDictionary} setAdultDictionary={setAdultDictionary} adultOnomatopoeia={adultOnomatopoeia} setAdultOnomatopoeia={setAdultOnomatopoeia} adultSceneFlow={adultSceneFlow} onOpenAdultTools={openAdultTools} onOpenSceneFlowScreen={openSceneFlowScreen} workspaceTab={writingTab} setWorkspaceTab={setWritingTab} onOpenSceneTools={openSceneTools} openChapterId={detailId} searchOpen={searchOpenReq} onSearchOpenHandled={(n)=>setSearchOpenReq(r=>(r && r.nonce===n) ? null : r)} openId={writingOpenId} setOpenId={setWritingOpenId} activeBlockId={writingBlockId} setActiveBlockId={setWritingBlockId} backRef={writingBackRef} />;
   } else if(screen==='aiimport'){
     body = <AiImportScreen data={data} setData={setData} lastImportBackup={lastImportBackup} setLastImportBackup={setLastImportBackup} />;
   } else if(screen==='adultTools'){

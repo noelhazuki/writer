@@ -269,6 +269,7 @@ function createPlotV2View(host, api){
   let dmap = new Map(), dsig = ''; // 下書き（文章の正本は本体の data.drafts。ここは表示用に参照するだけで、文章は持たない・書き換えない）
   let writerOpen = false, lastLaunchVS = null, pendingImgEvent = null;
   let reader = { scope:null }, readBack = null;
+  let hitId = null, hitTimer = null; // 検索から開いた対象の一時強調
   const bk = new Set(); // 「退避した元の文章」を開いている出来事（一時状態）
   const imgCache = new Map(), imgPending = new Set(); // キャラアイコン：画像IDごとの表示用URL（プロットには画像データを保存しない。既存の画像保存から都度取得）
 
@@ -714,7 +715,15 @@ function createPlotV2View(host, api){
       `<div id="view"><div class="trunk"><div class="card endcap">開始</div>${move ? renderMoveList(model.items, null, 0) : renderList(model.items, null, 0)}<div class="card endcap">終了</div></div></div>`;
     if(!move) growAll();
     paintIcons();
+    applyHit();
     window.scrollTo(0, y);
+  }
+  /* ---------- 作品内検索から開いた時の一時的な強調（保存しない・通常画面だけ） ---------- */
+  function hitEl(id){ return Array.prototype.find.call(root.querySelectorAll('[data-node]'), e => e.getAttribute('data-node') === id) || null; }
+  function applyHit(){
+    if(!hitId) return;
+    const el = hitEl(hitId);
+    if(el) el.classList.add('pv-hit');
   }
   function autoGrow(el){ el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
   function growAll(){ root.querySelectorAll('#view textarea.ag').forEach(autoGrow); }
@@ -1125,6 +1134,35 @@ function createPlotV2View(host, api){
       writerOpen = v;
       if(!v && model && !errState && !destroyed){ render(); restoreViewState(lastLaunchVS); }
     },
+    // 作品内検索から開く：対象と祖先を展開し、画面中央へスクロールして一時的に強調する。
+    // 通し読み・移動モードには入らない。作品データは書き換えない（端末内の開閉設定だけ、対象と祖先を開く分だけ変える）。
+    focusNode(id, openScene){
+      if(!model || errState || destroyed) return false;
+      const info = find(id);
+      if(!info) return false;
+      if(mode !== 'normal'){ mode = 'normal'; mv = { sel:null, col:{} }; readBack = null; }
+      let p = info.parent;
+      while(p){ ui.col[p.id] = false; const pi = find(p.id); p = pi ? pi.parent : null; }
+      if(info.node.kind === 'group') ui.col[id] = false;
+      else { ui.ev[id] = true; if(openScene) ui.sc[id] = true; }
+      saveUi();
+      clearTimeout(hitTimer);
+      hitId = id;
+      render();
+      const go = () => {
+        if(destroyed) return;
+        const el = hitEl(id);
+        if(el && el.scrollIntoView) el.scrollIntoView({ block:'center' });
+      };
+      go();
+      requestAnimationFrame(go);
+      hitTimer = setTimeout(() => {
+        const el = hitEl(id);
+        if(el) el.classList.remove('pv-hit');
+        if(hitId === id) hitId = null;
+      }, 3000);
+      return true;
+    },
     // キャラ資料などから戻ってきた時：プロット（または通し読み）の元の位置・状態へ戻す。開閉状態は端末内のUI設定から復元済み
     restoreState(vs){
       if(!vs || !model || errState) return;
@@ -1135,6 +1173,7 @@ function createPlotV2View(host, api){
     },
     destroy(){
       destroyed = true;
+      clearTimeout(hitTimer);
       commit();
       window.removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onHide);
@@ -1501,7 +1540,7 @@ function PlotDraftWriter({ data, setData, writer, onClose, onOpenChar, saveState
 }
 const SCENE_FIELD_LABELS = [['goal','目的'],['obstacle','対立・障害'],['change','場面で起きる変化'],['memo','自由メモ']];
 
-function PlotV2({ data, setData, markDirty, writerOpen, onOpenWriter, onOpenChar, restoreState, onRestored }){
+function PlotV2({ data, setData, markDirty, writerOpen, onOpenWriter, onOpenChar, restoreState, onRestored, focusRequest, onFocusHandled }){
   const hostRef = useRef(null), ctlRef = useRef(null);
   const apiRef = useRef({});
   apiRef.current = {
@@ -1529,6 +1568,12 @@ function PlotV2({ data, setData, markDirty, writerOpen, onOpenWriter, onOpenChar
   useEffect(()=>{
     if(ctlRef.current) ctlRef.current.setWriterOpen(!!writerOpen);
   }, [!!writerOpen]);
+  // 作品内検索から開いた時：対象まで展開してスクロール・強調（上の同期の後に実行される）
+  useEffect(()=>{
+    if(!focusRequest || !ctlRef.current) return;
+    ctlRef.current.focusNode(focusRequest.id, !!focusRequest.openScene);
+    if(onFocusHandled) onFocusHandled(focusRequest.nonce);
+  }, [focusRequest && focusRequest.nonce]);
   return <div ref={hostRef} />;
 }
 
