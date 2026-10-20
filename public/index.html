@@ -614,7 +614,9 @@
   .stat-row{ display:flex; gap:14px; flex-wrap:wrap; margin-top:16px; }
   .stat-box{ flex:1; min-width:110px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius-m); padding:14px 16px; text-align:center; }
   .stat-box .n{ font-family:"Shippori Mincho",serif; font-size:26px; color:var(--accent); }
-  .stat-box .l{ font-size:12px; color:var(--ink-soft); margin-top:2px; }
+  .stat-box .l{ font-size:12px; color:var(--ink-soft); margin-top:2px; overflow-wrap:anywhere; }
+  .stat-box .sub{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; overflow-wrap:anywhere; }
+  .dash-nav-item .count{ overflow-wrap:anywhere; }
 
   .dash-nav-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:12px; margin-top:16px; }
   .dash-nav-item{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius-m); padding:16px 14px; text-align:left; box-shadow:var(--shadow); }
@@ -10641,7 +10643,36 @@ function AdultWordMapTab({ adultDictionary }){
 }
 
 /* ============ ダッシュボード ============ */
+// ホームの執筆集計。「書く」（data.drafts）と「まとめる」（data.writings）は独立した別データなので、内容が同じでも統合・重複除去はしない。
+// 文字数は編集画面と同じ String.length。タイトル・メモ・履歴・ゴミ箱は含めない。作品データは読むだけで書き換えない。
+function writingStats(data){
+  const arr = (x) => Array.isArray(x) ? x : [];
+  const len = (v) => typeof v === 'string' ? v.length : 0;
+  const seen = new Set();
+  let draftCount = 0, draftChars = 0;
+  arr(data && data.drafts).forEach(d => {
+    if(!d || d.deleted) return;
+    if(d.id){ if(seen.has(d.id)) return; seen.add(d.id); } // 文章ID単位で一度だけ
+    draftCount++; draftChars += len(d.body);
+  });
+  let chapterCount = 0, sceneCount = 0, bodyChars = 0;
+  arr(data && data.writings).forEach(w => {
+    if(!w) return;
+    chapterCount++;
+    const blocks = arr(w.blocks);
+    if(blocks.length){
+      // 場面（blocks）がある章は場面だけ数える（章のbodyは場面本文の連結なので使わない＝二重計上しない）
+      blocks.forEach(b => { sceneCount++; bodyChars += len(b && b.body); });
+    } else {
+      // 場面が無い古い形式：読み込み時の正規化と同じく、章のbodyを1場面として扱う
+      sceneCount++; bodyChars += len(w.body);
+    }
+  });
+  return { draftCount, draftChars, chapterCount, sceneCount, bodyChars };
+}
+
 function Dashboard({ data, setScreen }){
+  const ws = writingStats(data);
   return (
     <div>
       <h1>{data.project.title || '無題の作品'}</h1>
@@ -10657,18 +10688,20 @@ function Dashboard({ data, setScreen }){
           if(n.key==='ideas') count = data.ideas.length;
           if(n.key==='plot') count = plotV2CountAll(data.plotV2);
           if(n.key==='plotOld') count = data.plot.chapters.length;
-          if(n.key==='writing') count = data.writings.length;
+          if(n.key==='writing') count = null;
+          const countLabel = n.key==='writing' ? `文章${ws.draftCount}件・本文${ws.chapterCount}章` : (count!==null ? `${count} 件` : null);
           return (
             <button key={n.key} className="dash-nav-item" onClick={()=>setScreen(n.key)}>
               <div className="icon">{n.icon}</div>
               <div className="label">{n.label}</div>
-              {count!==null && <div className="count">{count} 件</div>}
+              {countLabel!==null && <div className="count">{countLabel}</div>}
             </button>
           );
         })}
       </div>
       <div className="stat-row">
-        <div className="stat-box"><div className="n">{data.writings.reduce((s,w)=>s+w.body.length,0)}</div><div className="l">総執筆文字数</div></div>
+        <div className="stat-box"><div className="n">{ws.draftChars.toLocaleString()}</div><div className="l">書く：文章の文字数</div><div className="sub">文章 {ws.draftCount.toLocaleString()} 件</div></div>
+        <div className="stat-box"><div className="n">{ws.bodyChars.toLocaleString()}</div><div className="l">まとめる：本文の文字数</div><div className="sub">{ws.chapterCount.toLocaleString()} 章・{ws.sceneCount.toLocaleString()} 場面</div></div>
         <div className="stat-box"><div className="n">{data.ideas.filter(i=>i.status==='未使用').length}</div><div className="l">未使用のネタ</div></div>
         <div className="stat-box"><div className="n">{data.timeline.length}</div><div className="l">年表イベント</div></div>
       </div>
