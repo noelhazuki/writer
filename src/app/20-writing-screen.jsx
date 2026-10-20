@@ -1,7 +1,7 @@
 /* ============ 本文 ============ */
 const WRITING_LAST_DICT_TAB_KEY='novel-world-builder-writing-last-dict-tab-v1';
 const WRITING_DICT_TABS=['expression','special','media','adult','onomatopoeia'];
-function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, adultDictionary, setAdultDictionary, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow, onOpenAdultTools, onOpenSceneFlowScreen, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId, openId, setOpenId, activeBlockId, setActiveBlockId, backRef }){
+function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMode, writingSnippets, setWritingSnippets, expressionDictionary, setExpressionDictionary, specialDictionary, setSpecialDictionary, lastSpecialImportIds, setLastSpecialImportIds, mediaDictionary, setMediaDictionary, lastMediaImportIds, setLastMediaImportIds, adultDictionary, setAdultDictionary, adultOnomatopoeia, setAdultOnomatopoeia, adultSceneFlow, onOpenAdultTools, onOpenSceneFlowScreen, workspaceTab, setWorkspaceTab, onOpenSceneTools, openChapterId, searchOpen, onSearchOpenHandled, openId, setOpenId, activeBlockId, setActiveBlockId, backRef }){
   // 検索結果などから特定の章を直接開きたいとき（openChapterIdが変化するたび）に本文タブへ切り替えて開く。
   useEffect(()=>{
     if(!openChapterId) return;
@@ -13,6 +13,38 @@ function Writing({ data, setData, allChars, allLocations, focusMode, setFocusMod
     setReadAll(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openChapterId]);
+  // 作品内検索の結果から、文章（「書く」）または章・場面（「まとめる」）を直接開く。依頼のたび（nonceが変わるたび）に実行する。
+  // 以前開いていた文章・フォルダ・ゴミ箱表示・文章の検索語などに妨げられず、対象のIDを開く。データは書き換えず、開く文章の指定（activeDraftId）だけを切り替える。
+  useEffect(()=>{
+    if(!searchOpen) return;
+    const r = searchOpen;
+    try{ const a=document.activeElement; if(a&&a!==document.body&&a.blur) a.blur(); }catch(e){}
+    setDraftMenuOpen(false); setFlowOpen(false); setExprDictOpen(false); setToolsOpen(false); setDraftHistoryOpen(false);
+    setTextMenu(null); setTextDlg(null); setWritingMoreOpen(false); setFocusMode(false);
+    if(r.kind==='draft'){
+      const t = (data.drafts||[]).find(x=>x.id===r.draftId && !x.deleted);
+      if(t){
+        setWorkspaceTab('draft');
+        setDraftShowTrash(false); setTextQuery('');
+        setTextFolderId(t.folderId||null);
+        hasCursorInfoRef.current=false;
+        setData(d=>({...d,activeDraftId:t.id}));
+      }
+    } else if(r.kind==='chapter'){
+      const w = (data.writings||[]).find(x=>x.id===r.chapterId);
+      if(w){
+        const rows = Array.isArray(w.blocks) ? w.blocks : [];
+        const b = rows.find(x=>x.id===r.blockId) || rows[0];
+        setWorkspaceTab('chapters');
+        setOpenId(w.id);
+        setActiveBlockId(b ? b.id : undefined);
+        setReadAll(false); setBlockDraft(null);
+        setTimeout(()=>{ try{ const el=document.querySelector('.writing-block-card.active'); if(el&&el.scrollIntoView) el.scrollIntoView({block:'center'}); }catch(e){} }, 80);
+      }
+    }
+    if(onSearchOpenHandled) onSearchOpenHandled(r.nonce);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen && searchOpen.nonce]);
   const [blockDraft,setBlockDraft]=useState(null);
   const [readAll,setReadAll]=useState(false);
   const [passageDraft,setPassageDraft]=useState(null);
